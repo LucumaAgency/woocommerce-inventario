@@ -172,6 +172,28 @@ class MSP_Stock {
 	}
 
 	/**
+	 * Stock disponible de un producto en una sede (físico − reservado).
+	 *
+	 * @param int $producto_id ID de producto.
+	 * @param int $sede_id     ID de sede.
+	 * @return int
+	 */
+	public static function disponible_sede( $producto_id, $sede_id ) {
+		global $wpdb;
+		$fila = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT stock, stock_reservado FROM ' . self::tabla() . ' WHERE producto_id = %d AND sede_id = %d',
+				$producto_id,
+				$sede_id
+			)
+		);
+		if ( ! $fila ) {
+			return 0;
+		}
+		return max( 0, (int) $fila->stock - (int) $fila->stock_reservado );
+	}
+
+	/**
 	 * Suma del stock físico de todas las sedes de un producto.
 	 *
 	 * @param int $producto_id ID de producto.

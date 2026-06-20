@@ -57,14 +57,32 @@ class MSP_Recojo {
 			return;
 		}
 
-		$opciones = array( '' => __( 'Elige una tienda…', 'multisede-pos' ) );
-		foreach ( $sedes as $sede ) {
-			$direccion              = get_post_meta( $sede->ID, '_msp_direccion', true );
-			$etiqueta               = $direccion ? $sede->post_title . ' — ' . $direccion : $sede->post_title;
-			$opciones[ $sede->ID ]  = $etiqueta;
+		echo '<div id="msp_recojo_field"><h3>' . esc_html__( 'Recojo en tienda', 'multisede-pos' ) . '</h3>';
+
+		// Si el cliente ya eligió tienda (compra por sede), se fija esa.
+		$sede_activa = class_exists( 'MSP_Frontend' ) ? MSP_Frontend::sede_activa() : 0;
+
+		if ( $sede_activa ) {
+			echo '<p>' . esc_html__( 'Recogerás tu pedido en:', 'multisede-pos' ) . ' <strong>' .
+				esc_html( get_the_title( $sede_activa ) ) . '</strong>';
+			$dir = get_post_meta( $sede_activa, '_msp_direccion', true );
+			if ( $dir ) {
+				echo ' <span class="msp-dir">(' . esc_html( $dir ) . ')</span>';
+			}
+			echo '</p>';
+			echo '<input type="hidden" name="msp_sede_recojo" value="' . esc_attr( $sede_activa ) . '" />';
+			echo '</div>';
+			return;
 		}
 
-		echo '<div id="msp_recojo_field"><h3>' . esc_html__( 'Recojo en tienda', 'multisede-pos' ) . '</h3>';
+		// Si no hay tienda elegida, se ofrece el selector.
+		$opciones = array( '' => __( 'Elige una tienda…', 'multisede-pos' ) );
+		foreach ( $sedes as $sede ) {
+			$direccion             = get_post_meta( $sede->ID, '_msp_direccion', true );
+			$etiqueta              = $direccion ? $sede->post_title . ' — ' . $direccion : $sede->post_title;
+			$opciones[ $sede->ID ] = $etiqueta;
+		}
+
 		echo '<p>' . esc_html__( 'Por ahora solo entregamos con recojo en tienda. Elige dónde recogerás tu pedido.', 'multisede-pos' ) . '</p>';
 
 		woocommerce_form_field(

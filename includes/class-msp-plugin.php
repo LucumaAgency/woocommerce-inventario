@@ -32,6 +32,10 @@ class MSP_Plugin {
 		$recojo = new MSP_Recojo();
 		$recojo->init();
 
+		// Compra por tienda en el frontend (stock de la sede elegida).
+		$frontend = new MSP_Frontend();
+		$frontend->init();
+
 		// POS de mostrador (Fase 4).
 		$pos = new MSP_POS();
 		$pos->init();

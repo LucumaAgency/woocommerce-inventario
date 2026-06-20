@@ -4,7 +4,7 @@ Tags: woocommerce, inventario, multi-almacen, pos, caja
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,9 @@ Requiere WooCommerce activo.
 3. Configura tus sedes en el nuevo menú "Sedes".
 
 == Changelog ==
+
+= 1.1.0 =
+* Compra por tienda: el cliente elige una sede y la web muestra y respeta solo el stock de esa sede. Incluye selector de tienda (shortcode [msp_selector_sede] y banner en las páginas de tienda), disponibilidad y estado de stock por sede, validación al agregar al carrito y en el checkout, y sede de recojo fijada a la tienda elegida.
 
 = 1.0.0 =
 * Fase 5: caja chica. Apertura de caja por sede y cajero, registro de ingresos y egresos, registro automático de ventas POS en efectivo, cierre con arqueo (esperado vs contado) y reporte de cierres recientes. Con esta fase el plugin queda funcionalmente completo.

@@ -24,6 +24,13 @@ Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas fís
 | 3 | Recojo en tienda | ✅ Implementado |
 | 4 | POS de mostrador | ✅ Implementado |
 | 5 | Caja chica | ✅ Implementado |
+| + | Compra por tienda (stock por sede en la web) | ✅ Implementado (v1.1.0) |
+
+### Compra por tienda
+
+Desde la v1.1.0, la tienda online opera **por sede**: el cliente elige una tienda y solo ve y compra el stock de esa sede. El stock que muestra WooCommerce, la validación de carrito y la sede de recojo se basan en la tienda elegida.
+
+Coloca el selector donde quieras con el shortcode `[msp_selector_sede]` (además aparece un banner automático en las páginas de tienda, producto, carrito y checkout).
 
 La Fase 1 ya crea: el menú **Sedes**, los roles **Gerente de sede** y **Cajero**, y las tablas `msp_stock`, `msp_caja_sesiones` y `msp_caja_movimientos` (listas para las fases siguientes).
 

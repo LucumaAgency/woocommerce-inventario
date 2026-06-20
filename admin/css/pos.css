@@ -1,0 +1,100 @@
+.msp-pos-top {
+	margin: 12px 0 16px;
+}
+.msp-pos-top select {
+	min-width: 220px;
+}
+.msp-pos-grid {
+	display: flex;
+	gap: 20px;
+	align-items: flex-start;
+}
+.msp-pos-col {
+	flex: 1;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 8px;
+	padding: 16px;
+}
+#msp-pos-buscar {
+	width: 100%;
+	font-size: 16px;
+	padding: 10px;
+}
+#msp-pos-resultados {
+	margin: 10px 0 0;
+	max-height: 460px;
+	overflow-y: auto;
+}
+#msp-pos-resultados li {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 10px 12px;
+	border: 1px solid #f0f0f1;
+	border-radius: 6px;
+	margin-bottom: 6px;
+	cursor: pointer;
+}
+#msp-pos-resultados li:hover {
+	background: #f6f7f7;
+}
+#msp-pos-resultados li.msp-no-stock {
+	opacity: .5;
+	cursor: not-allowed;
+}
+#msp-pos-resultados .msp-prod-meta {
+	color: #787c82;
+	font-size: 12px;
+}
+.msp-pos-ticket {
+	width: 100%;
+	border-collapse: collapse;
+}
+.msp-pos-ticket th,
+.msp-pos-ticket td {
+	padding: 8px;
+	border-bottom: 1px solid #f0f0f1;
+	text-align: left;
+}
+.msp-pos-ticket tfoot th {
+	font-size: 16px;
+	border-top: 2px solid #2c3338;
+}
+.msp-pos-ticket .msp-qty {
+	width: 56px;
+}
+.msp-pos-quitar {
+	color: #b32d2e;
+	cursor: pointer;
+	text-decoration: none;
+}
+.msp-pos-pago {
+	margin-top: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.msp-pos-pago select,
+.msp-pos-pago input {
+	max-width: 240px;
+}
+#msp-pos-vuelto {
+	font-weight: 600;
+	margin: 4px 0 0;
+}
+#msp-pos-cobrar {
+	margin-top: 8px;
+	align-self: flex-start;
+}
+#msp-pos-mensaje {
+	margin-top: 12px;
+}
+#msp-pos-mensaje .ok {
+	color: #1C8E80;
+	font-weight: 600;
+}
+#msp-pos-mensaje .err {
+	color: #b32d2e;
+	font-weight: 600;
+}

@@ -4,7 +4,7 @@ Tags: woocommerce, inventario, multi-almacen, pos, caja
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 0.3.0
+Stable tag: 0.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,9 @@ Requiere WooCommerce activo.
 3. Configura tus sedes en el nuevo menú "Sedes".
 
 == Changelog ==
+
+= 0.4.0 =
+* Fase 4: POS de mostrador. Pantalla de punto de venta con búsqueda de productos por AJAX, ticket, métodos de pago y cálculo de vuelto en efectivo. Genera un pedido de WooCommerce completado, descuenta stock de la sede del cajero y repone el stock si la venta se anula. Validación de stock y permisos por sede.
 
 = 0.3.0 =
 * Fase 3: recojo en tienda. Selección de sede de recojo en el checkout, reserva de stock al pagar, acción "Marcar como recogido" que descuenta el stock físico, liberación de reserva en cancelaciones y visualización de la sede en el pedido. El stock disponible de Woo pasa a ser stock físico menos reservado.

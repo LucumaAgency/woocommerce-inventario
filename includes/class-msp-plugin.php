@@ -32,6 +32,10 @@ class MSP_Plugin {
 		$recojo = new MSP_Recojo();
 		$recojo->init();
 
+		// POS de mostrador (Fase 4).
+		$pos = new MSP_POS();
+		$pos->init();
+
 		// Asistente de configuración (wizard).
 		if ( is_admin() ) {
 			$wizard = new MSP_Wizard();

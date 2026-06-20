@@ -23,7 +23,7 @@ Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas fís
 | 2 | Inventario multi-sede | ✅ Implementado |
 | 3 | Recojo en tienda | ✅ Implementado |
 | 4 | POS de mostrador | ✅ Implementado |
-| 5 | Caja chica | ⏳ Pendiente |
+| 5 | Caja chica | ✅ Implementado |
 
 La Fase 1 ya crea: el menú **Sedes**, los roles **Gerente de sede** y **Cajero**, y las tablas `msp_stock`, `msp_caja_sesiones` y `msp_caja_movimientos` (listas para las fases siguientes).
 

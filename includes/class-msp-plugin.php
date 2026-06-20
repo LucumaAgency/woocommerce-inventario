@@ -36,6 +36,10 @@ class MSP_Plugin {
 		$pos = new MSP_POS();
 		$pos->init();
 
+		// Caja chica (Fase 5).
+		$caja = new MSP_Caja();
+		$caja->init();
+
 		// Asistente de configuración (wizard).
 		if ( is_admin() ) {
 			$wizard = new MSP_Wizard();

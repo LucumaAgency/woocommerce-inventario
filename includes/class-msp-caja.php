@@ -1,0 +1,579 @@
+<?php
+/**
+ * Caja chica: apertura, movimientos y arqueo por sede y cajero.
+ *
+ * @package Multisede_POS
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+/**
+ * Gestiona las cajas (sesiones) y sus movimientos.
+ */
+class MSP_Caja {
+
+	const PAGE = 'msp-caja';
+
+	/**
+	 * Engancha hooks.
+	 */
+	public function init() {
+		add_action( 'admin_menu', array( $this, 'registrar_pagina' ) );
+		add_action( 'admin_init', array( $this, 'procesar' ) );
+		// Registrar las ventas POS en efectivo como movimiento de caja.
+		add_action( 'msp_pos_venta_creada', array( $this, 'registrar_venta_pos' ), 10, 3 );
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Tablas
+	 * ------------------------------------------------------------------- */
+
+	/** @return string */
+	public static function tabla_sesiones() {
+		global $wpdb;
+		return $wpdb->prefix . 'msp_caja_sesiones';
+	}
+
+	/** @return string */
+	public static function tabla_movimientos() {
+		global $wpdb;
+		return $wpdb->prefix . 'msp_caja_movimientos';
+	}
+
+	/* ---------------------------------------------------------------------
+	 * API de datos
+	 * ------------------------------------------------------------------- */
+
+	/**
+	 * Devuelve la sesión abierta de un cajero en una sede, si existe.
+	 *
+	 * @param int $sede_id   ID de sede.
+	 * @param int $cajero_id ID de usuario.
+	 * @return object|null
+	 */
+	public static function sesion_abierta( $sede_id, $cajero_id ) {
+		global $wpdb;
+		return $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT * FROM ' . self::tabla_sesiones() . "
+				 WHERE sede_id = %d AND cajero_id = %d AND estado = 'abierta'
+				 ORDER BY id DESC LIMIT 1",
+				$sede_id,
+				$cajero_id
+			)
+		);
+	}
+
+	/**
+	 * Abre una caja.
+	 *
+	 * @param int   $sede_id   Sede.
+	 * @param int   $cajero_id Cajero.
+	 * @param float $apertura  Monto de apertura.
+	 * @return int|false ID de la sesión o false si ya hay una abierta.
+	 */
+	public static function abrir( $sede_id, $cajero_id, $apertura ) {
+		global $wpdb;
+
+		if ( self::sesion_abierta( $sede_id, $cajero_id ) ) {
+			return false;
+		}
+
+		$wpdb->insert(
+			self::tabla_sesiones(),
+			array(
+				'sede_id'        => $sede_id,
+				'cajero_id'      => $cajero_id,
+				'monto_apertura' => round( (float) $apertura, 2 ),
+				'estado'         => 'abierta',
+				'abierta_at'     => current_time( 'mysql' ),
+			),
+			array( '%d', '%d', '%f', '%s', '%s' )
+		);
+
+		return (int) $wpdb->insert_id;
+	}
+
+	/**
+	 * Registra un movimiento en una sesión.
+	 *
+	 * @param int      $sesion_id Sesión.
+	 * @param string   $tipo      ingreso | egreso | venta.
+	 * @param string   $concepto  Descripción.
+	 * @param float    $monto     Importe (positivo).
+	 * @param int|null $pedido_id Pedido asociado (opcional).
+	 * @return void
+	 */
+	public static function agregar_movimiento( $sesion_id, $tipo, $concepto, $monto, $pedido_id = null ) {
+		global $wpdb;
+		$wpdb->insert(
+			self::tabla_movimientos(),
+			array(
+				'sesion_id' => $sesion_id,
+				'tipo'      => $tipo,
+				'concepto'  => $concepto,
+				'monto'     => round( (float) $monto, 2 ),
+				'pedido_id' => $pedido_id ? (int) $pedido_id : null,
+				'creado_at' => current_time( 'mysql' ),
+			),
+			array( '%d', '%s', '%s', '%f', '%d', '%s' )
+		);
+	}
+
+	/**
+	 * Movimientos de una sesión.
+	 *
+	 * @param int $sesion_id Sesión.
+	 * @return array
+	 */
+	public static function movimientos( $sesion_id ) {
+		global $wpdb;
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT * FROM ' . self::tabla_movimientos() . ' WHERE sesion_id = %d ORDER BY id ASC',
+				$sesion_id
+			)
+		);
+	}
+
+	/**
+	 * Sumas por tipo de una sesión.
+	 *
+	 * @param int $sesion_id Sesión.
+	 * @return array{ingresos:float,egresos:float,ventas:float}
+	 */
+	public static function totales( $sesion_id ) {
+		global $wpdb;
+		$filas = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT tipo, COALESCE(SUM(monto),0) AS total
+				 FROM ' . self::tabla_movimientos() . '
+				 WHERE sesion_id = %d GROUP BY tipo',
+				$sesion_id
+			),
+			OBJECT_K
+		);
+
+		return array(
+			'ingresos' => isset( $filas['ingreso'] ) ? (float) $filas['ingreso']->total : 0,
+			'egresos'  => isset( $filas['egreso'] ) ? (float) $filas['egreso']->total : 0,
+			'ventas'   => isset( $filas['venta'] ) ? (float) $filas['venta']->total : 0,
+		);
+	}
+
+	/**
+	 * Efectivo esperado en caja para una sesión.
+	 *
+	 * Esperado = apertura + ingresos + ventas en efectivo − egresos.
+	 *
+	 * @param object $sesion Sesión.
+	 * @return float
+	 */
+	public static function esperado( $sesion ) {
+		$t = self::totales( $sesion->id );
+		return (float) $sesion->monto_apertura + $t['ingresos'] + $t['ventas'] - $t['egresos'];
+	}
+
+	/**
+	 * Cierra una caja con arqueo.
+	 *
+	 * @param object $sesion   Sesión.
+	 * @param float  $contado  Efectivo contado.
+	 * @return void
+	 */
+	public static function cerrar( $sesion, $contado ) {
+		global $wpdb;
+		$esperado   = self::esperado( $sesion );
+		$contado    = round( (float) $contado, 2 );
+		$diferencia = round( $contado - $esperado, 2 );
+
+		$wpdb->update(
+			self::tabla_sesiones(),
+			array(
+				'monto_cierre_esperado' => round( $esperado, 2 ),
+				'monto_cierre_contado'  => $contado,
+				'diferencia'            => $diferencia,
+				'estado'                => 'cerrada',
+				'cerrada_at'            => current_time( 'mysql' ),
+			),
+			array( 'id' => $sesion->id ),
+			array( '%f', '%f', '%f', '%s', '%s' ),
+			array( '%d' )
+		);
+	}
+
+	/**
+	 * Registra una venta POS en efectivo como movimiento de caja.
+	 *
+	 * @param WC_Order $order   Pedido.
+	 * @param string   $metodo  Método de pago.
+	 * @param int      $sede_id Sede.
+	 */
+	public function registrar_venta_pos( $order, $metodo, $sede_id ) {
+		if ( 'efectivo' !== $metodo ) {
+			return;
+		}
+
+		$cajero_id = (int) $order->get_meta( '_msp_cajero_id' );
+		$sesion    = self::sesion_abierta( $sede_id, $cajero_id );
+		if ( ! $sesion ) {
+			// No hay caja abierta; la venta queda registrada solo como pedido.
+			return;
+		}
+
+		self::agregar_movimiento(
+			$sesion->id,
+			'venta',
+			sprintf(
+				/* translators: %s: número de pedido. */
+				__( 'Venta POS #%s', 'multisede-pos' ),
+				$order->get_order_number()
+			),
+			$order->get_total(),
+			$order->get_id()
+		);
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Sedes disponibles para el usuario
+	 * ------------------------------------------------------------------- */
+
+	/**
+	 * Sedes de mostrador donde el usuario puede gestionar caja.
+	 *
+	 * @return WP_Post[]
+	 */
+	private function sedes_disponibles() {
+		$mostrador = array_filter(
+			MSP_Sedes::obtener_sedes_activas(),
+			function ( $sede ) {
+				return '1' === get_post_meta( $sede->ID, '_msp_vende_mostrador', true );
+			}
+		);
+
+		if ( current_user_can( 'manage_options' ) ) {
+			return array_values( $mostrador );
+		}
+
+		$mias = MSP_Roles::sedes_de_usuario( get_current_user_id() );
+		return array_values(
+			array_filter(
+				$mostrador,
+				function ( $sede ) use ( $mias ) {
+					return in_array( $sede->ID, $mias, true );
+				}
+			)
+		);
+	}
+
+	/**
+	 * ¿Puede el usuario operar esa sede?
+	 *
+	 * @param int $sede_id Sede.
+	 * @return bool
+	 */
+	private function puede_usar_sede( $sede_id ) {
+		foreach ( $this->sedes_disponibles() as $sede ) {
+			if ( (int) $sede->ID === (int) $sede_id ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Página de administración
+	 * ------------------------------------------------------------------- */
+
+	/**
+	 * Registra la página de Caja.
+	 */
+	public function registrar_pagina() {
+		add_menu_page(
+			__( 'Caja chica', 'multisede-pos' ),
+			__( 'Caja', 'multisede-pos' ),
+			'msp_gestionar_caja',
+			self::PAGE,
+			array( $this, 'render' ),
+			'dashicons-money-alt',
+			58
+		);
+	}
+
+	/**
+	 * Procesa los formularios de la caja.
+	 */
+	public function procesar() {
+		if ( ! isset( $_POST['msp_caja_action'] ) ) {
+			return;
+		}
+		if ( ! current_user_can( 'msp_gestionar_caja' ) ) {
+			return;
+		}
+		check_admin_referer( 'msp_caja', 'msp_caja_nonce' );
+
+		$accion  = sanitize_key( wp_unslash( $_POST['msp_caja_action'] ) );
+		$sede_id = isset( $_POST['sede'] ) ? absint( wp_unslash( $_POST['sede'] ) ) : 0;
+
+		if ( ! $sede_id || ! $this->puede_usar_sede( $sede_id ) ) {
+			return;
+		}
+
+		$cajero_id = get_current_user_id();
+		$aviso     = '';
+
+		if ( 'abrir_caja' === $accion ) {
+			$apertura = isset( $_POST['monto_apertura'] ) ? (float) wp_unslash( $_POST['monto_apertura'] ) : 0;
+			$ok       = self::abrir( $sede_id, $cajero_id, $apertura );
+			$aviso    = $ok ? 'abierta' : 'ya_abierta';
+
+		} elseif ( 'mov_caja' === $accion ) {
+			$sesion = self::sesion_abierta( $sede_id, $cajero_id );
+			if ( $sesion ) {
+				$tipo     = isset( $_POST['tipo'] ) && 'egreso' === $_POST['tipo'] ? 'egreso' : 'ingreso';
+				$concepto = isset( $_POST['concepto'] ) ? sanitize_text_field( wp_unslash( $_POST['concepto'] ) ) : '';
+				$monto    = isset( $_POST['monto'] ) ? (float) wp_unslash( $_POST['monto'] ) : 0;
+				if ( $monto > 0 ) {
+					self::agregar_movimiento( $sesion->id, $tipo, $concepto, $monto );
+					$aviso = 'movimiento';
+				}
+			}
+		} elseif ( 'cerrar_caja' === $accion ) {
+			$sesion = self::sesion_abierta( $sede_id, $cajero_id );
+			if ( $sesion ) {
+				$contado = isset( $_POST['monto_contado'] ) ? (float) wp_unslash( $_POST['monto_contado'] ) : 0;
+				self::cerrar( $sesion, $contado );
+				$aviso = 'cerrada';
+			}
+		}
+
+		wp_safe_redirect(
+			add_query_arg(
+				array(
+					'page'  => self::PAGE,
+					'sede'  => $sede_id,
+					'aviso' => $aviso,
+				),
+				admin_url( 'admin.php' )
+			)
+		);
+		exit;
+	}
+
+	/**
+	 * Renderiza la página de Caja.
+	 */
+	public function render() {
+		$sedes = $this->sedes_disponibles();
+		echo '<div class="wrap"><h1>' . esc_html__( 'Caja chica', 'multisede-pos' ) . '</h1>';
+
+		if ( empty( $sedes ) ) {
+			echo '<div class="notice notice-warning"><p>' .
+				esc_html__( 'No tienes ninguna sede de mostrador asignada para gestionar caja.', 'multisede-pos' ) .
+				'</p></div></div>';
+			return;
+		}
+
+		$this->avisos();
+
+		// Sede seleccionada.
+		$sede_id = isset( $_GET['sede'] ) ? absint( wp_unslash( $_GET['sede'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( ! $sede_id || ! $this->puede_usar_sede( $sede_id ) ) {
+			$sede_id = (int) $sedes[0]->ID;
+		}
+
+		// Selector de sede.
+		echo '<form method="get" style="margin:12px 0"><input type="hidden" name="page" value="' . esc_attr( self::PAGE ) . '" />';
+		echo '<label><strong>' . esc_html__( 'Sede:', 'multisede-pos' ) . '</strong> <select name="sede" onchange="this.form.submit()">';
+		foreach ( $sedes as $sede ) {
+			echo '<option value="' . esc_attr( $sede->ID ) . '" ' . selected( $sede->ID, $sede_id, false ) . '>' .
+				esc_html( $sede->post_title ) . '</option>';
+		}
+		echo '</select></label></form>';
+
+		$cajero_id = get_current_user_id();
+		$sesion    = self::sesion_abierta( $sede_id, $cajero_id );
+
+		if ( $sesion ) {
+			$this->vista_caja_abierta( $sesion, $sede_id );
+		} else {
+			$this->vista_abrir_caja( $sede_id );
+		}
+
+		$this->tabla_reportes( $sede_id );
+		echo '</div>';
+	}
+
+	/**
+	 * Avisos según el parámetro de la URL.
+	 */
+	private function avisos() {
+		if ( ! isset( $_GET['aviso'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+		$aviso   = sanitize_key( wp_unslash( $_GET['aviso'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$mensajes = array(
+			'abierta'    => array( 'success', __( 'Caja abierta.', 'multisede-pos' ) ),
+			'ya_abierta' => array( 'warning', __( 'Ya tienes una caja abierta en esta sede.', 'multisede-pos' ) ),
+			'movimiento' => array( 'success', __( 'Movimiento registrado.', 'multisede-pos' ) ),
+			'cerrada'    => array( 'success', __( 'Caja cerrada. Revisa el arqueo abajo.', 'multisede-pos' ) ),
+		);
+		if ( isset( $mensajes[ $aviso ] ) ) {
+			printf(
+				'<div class="notice notice-%1$s is-dismissible"><p>%2$s</p></div>',
+				esc_attr( $mensajes[ $aviso ][0] ),
+				esc_html( $mensajes[ $aviso ][1] )
+			);
+		}
+	}
+
+	/**
+	 * Formulario para abrir caja.
+	 *
+	 * @param int $sede_id Sede.
+	 */
+	private function vista_abrir_caja( $sede_id ) {
+		echo '<div style="background:#fff;border:1px solid #dcdcde;border-radius:8px;padding:20px;max-width:480px">';
+		echo '<h2>' . esc_html__( 'Abrir caja', 'multisede-pos' ) . '</h2>';
+		echo '<form method="post">';
+		wp_nonce_field( 'msp_caja', 'msp_caja_nonce' );
+		echo '<input type="hidden" name="msp_caja_action" value="abrir_caja" />';
+		echo '<input type="hidden" name="sede" value="' . esc_attr( $sede_id ) . '" />';
+		echo '<p><label>' . esc_html__( 'Monto de apertura', 'multisede-pos' ) . '<br>';
+		echo '<input type="number" step="0.01" min="0" name="monto_apertura" value="0" required class="regular-text" /></label></p>';
+		echo '<button type="submit" class="button button-primary">' . esc_html__( 'Abrir caja', 'multisede-pos' ) . '</button>';
+		echo '</form></div>';
+	}
+
+	/**
+	 * Vista de una caja abierta: resumen, movimientos y cierre.
+	 *
+	 * @param object $sesion  Sesión.
+	 * @param int    $sede_id Sede.
+	 */
+	private function vista_caja_abierta( $sesion, $sede_id ) {
+		$t        = self::totales( $sesion->id );
+		$esperado = self::esperado( $sesion );
+
+		echo '<div style="display:flex;gap:20px;flex-wrap:wrap">';
+
+		// Resumen.
+		echo '<div style="flex:1;min-width:300px;background:#fff;border:1px solid #dcdcde;border-radius:8px;padding:20px">';
+		echo '<h2>' . esc_html__( 'Caja abierta', 'multisede-pos' ) . '</h2>';
+		echo '<table class="widefat striped"><tbody>';
+		$this->fila_resumen( __( 'Apertura', 'multisede-pos' ), $sesion->monto_apertura );
+		$this->fila_resumen( __( 'Ventas en efectivo', 'multisede-pos' ), $t['ventas'] );
+		$this->fila_resumen( __( 'Otros ingresos', 'multisede-pos' ), $t['ingresos'] );
+		$this->fila_resumen( __( 'Egresos', 'multisede-pos' ), -$t['egresos'] );
+		echo '<tr style="font-weight:700;font-size:15px"><td>' . esc_html__( 'Efectivo esperado', 'multisede-pos' ) .
+			'</td><td>' . wp_kses_post( wc_price( $esperado ) ) . '</td></tr>';
+		echo '</tbody></table>';
+
+		// Cerrar caja (arqueo).
+		echo '<h3 style="margin-top:20px">' . esc_html__( 'Cerrar caja (arqueo)', 'multisede-pos' ) . '</h3>';
+		echo '<form method="post">';
+		wp_nonce_field( 'msp_caja', 'msp_caja_nonce' );
+		echo '<input type="hidden" name="msp_caja_action" value="cerrar_caja" />';
+		echo '<input type="hidden" name="sede" value="' . esc_attr( $sede_id ) . '" />';
+		echo '<p><label>' . esc_html__( 'Efectivo contado', 'multisede-pos' ) . '<br>';
+		echo '<input type="number" step="0.01" min="0" name="monto_contado" required class="regular-text" /></label></p>';
+		echo '<button type="submit" class="button" onclick="return confirm(\'' .
+			esc_js( __( '¿Cerrar la caja con el monto indicado?', 'multisede-pos' ) ) . '\')">' .
+			esc_html__( 'Cerrar caja', 'multisede-pos' ) . '</button>';
+		echo '</form></div>';
+
+		// Movimientos.
+		echo '<div style="flex:1;min-width:300px;background:#fff;border:1px solid #dcdcde;border-radius:8px;padding:20px">';
+		echo '<h2>' . esc_html__( 'Registrar movimiento', 'multisede-pos' ) . '</h2>';
+		echo '<form method="post">';
+		wp_nonce_field( 'msp_caja', 'msp_caja_nonce' );
+		echo '<input type="hidden" name="msp_caja_action" value="mov_caja" />';
+		echo '<input type="hidden" name="sede" value="' . esc_attr( $sede_id ) . '" />';
+		echo '<p><select name="tipo"><option value="ingreso">' . esc_html__( 'Ingreso', 'multisede-pos' ) .
+			'</option><option value="egreso">' . esc_html__( 'Egreso (gasto)', 'multisede-pos' ) . '</option></select></p>';
+		echo '<p><input type="text" name="concepto" placeholder="' . esc_attr__( 'Concepto', 'multisede-pos' ) . '" class="regular-text" /></p>';
+		echo '<p><input type="number" step="0.01" min="0" name="monto" placeholder="' . esc_attr__( 'Monto', 'multisede-pos' ) . '" required /></p>';
+		echo '<button type="submit" class="button">' . esc_html__( 'Agregar', 'multisede-pos' ) . '</button>';
+		echo '</form>';
+
+		// Lista de movimientos.
+		$movs = self::movimientos( $sesion->id );
+		echo '<h3 style="margin-top:20px">' . esc_html__( 'Movimientos', 'multisede-pos' ) . '</h3>';
+		if ( $movs ) {
+			echo '<table class="widefat striped"><thead><tr><th>' . esc_html__( 'Tipo', 'multisede-pos' ) .
+				'</th><th>' . esc_html__( 'Concepto', 'multisede-pos' ) . '</th><th>' . esc_html__( 'Monto', 'multisede-pos' ) . '</th></tr></thead><tbody>';
+			$etiquetas = array(
+				'ingreso' => __( 'Ingreso', 'multisede-pos' ),
+				'egreso'  => __( 'Egreso', 'multisede-pos' ),
+				'venta'   => __( 'Venta', 'multisede-pos' ),
+			);
+			foreach ( $movs as $m ) {
+				$signo = 'egreso' === $m->tipo ? '-' : '+';
+				echo '<tr><td>' . esc_html( isset( $etiquetas[ $m->tipo ] ) ? $etiquetas[ $m->tipo ] : $m->tipo ) .
+					'</td><td>' . esc_html( $m->concepto ) . '</td><td>' . esc_html( $signo ) . wp_kses_post( wc_price( $m->monto ) ) . '</td></tr>';
+			}
+			echo '</tbody></table>';
+		} else {
+			echo '<p>' . esc_html__( 'Sin movimientos todavía.', 'multisede-pos' ) . '</p>';
+		}
+		echo '</div></div>';
+	}
+
+	/**
+	 * Fila del resumen.
+	 *
+	 * @param string $label Etiqueta.
+	 * @param float  $monto Monto.
+	 */
+	private function fila_resumen( $label, $monto ) {
+		echo '<tr><td>' . esc_html( $label ) . '</td><td>' . wp_kses_post( wc_price( $monto ) ) . '</td></tr>';
+	}
+
+	/**
+	 * Tabla de cierres recientes (reporte).
+	 *
+	 * @param int $sede_id Sede.
+	 */
+	private function tabla_reportes( $sede_id ) {
+		global $wpdb;
+
+		$sesiones = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT * FROM ' . self::tabla_sesiones() . "
+				 WHERE sede_id = %d AND estado = 'cerrada'
+				 ORDER BY cerrada_at DESC LIMIT 15",
+				$sede_id
+			)
+		);
+
+		echo '<h2 style="margin-top:30px">' . esc_html__( 'Cierres recientes', 'multisede-pos' ) . '</h2>';
+		if ( ! $sesiones ) {
+			echo '<p>' . esc_html__( 'Aún no hay cierres de caja en esta sede.', 'multisede-pos' ) . '</p>';
+			return;
+		}
+
+		echo '<table class="widefat striped"><thead><tr>';
+		echo '<th>' . esc_html__( 'Cajero', 'multisede-pos' ) . '</th>';
+		echo '<th>' . esc_html__( 'Cierre', 'multisede-pos' ) . '</th>';
+		echo '<th>' . esc_html__( 'Esperado', 'multisede-pos' ) . '</th>';
+		echo '<th>' . esc_html__( 'Contado', 'multisede-pos' ) . '</th>';
+		echo '<th>' . esc_html__( 'Diferencia', 'multisede-pos' ) . '</th>';
+		echo '</tr></thead><tbody>';
+
+		foreach ( $sesiones as $s ) {
+			$user      = get_userdata( $s->cajero_id );
+			$dif       = (float) $s->diferencia;
+			$color     = 0 === (int) round( $dif * 100 ) ? '#1C8E80' : ( $dif < 0 ? '#b32d2e' : '#996800' );
+			echo '<tr>';
+			echo '<td>' . esc_html( $user ? $user->display_name : '#' . $s->cajero_id ) . '</td>';
+			echo '<td>' . esc_html( $s->cerrada_at ) . '</td>';
+			echo '<td>' . wp_kses_post( wc_price( $s->monto_cierre_esperado ) ) . '</td>';
+			echo '<td>' . wp_kses_post( wc_price( $s->monto_cierre_contado ) ) . '</td>';
+			echo '<td style="color:' . esc_attr( $color ) . ';font-weight:600">' . wp_kses_post( wc_price( $dif ) ) . '</td>';
+			echo '</tr>';
+		}
+		echo '</tbody></table>';
+	}
+}

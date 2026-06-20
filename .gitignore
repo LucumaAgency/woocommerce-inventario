@@ -1,0 +1,16 @@
+# Dependencias
+/vendor/
+/node_modules/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Editores
+.idea/
+.vscode/
+*.sublime-*
+
+# Logs y temporales
+*.log
+*.tmp

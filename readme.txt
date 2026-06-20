@@ -1,0 +1,33 @@
+=== Multisede POS ===
+Contributors: lucumaagency
+Tags: woocommerce, inventario, multi-almacen, pos, caja
+Requires at least: 6.0
+Tested up to: 6.5
+Requires PHP: 7.4
+Stable tag: 0.1.0
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+
+Inventario por sede, recojo en tienda, POS de mostrador y caja chica para WooCommerce.
+
+== Description ==
+
+Multisede POS extiende WooCommerce para gestionar varias tiendas físicas y la tienda virtual:
+
+* Stock independiente por sede.
+* Recojo en tienda (sin delivery por web).
+* Punto de venta de mostrador que genera pedidos WooCommerce.
+* Caja chica con apertura, movimientos y arqueo por sede y turno.
+
+Requiere WooCommerce activo.
+
+== Installation ==
+
+1. Sube la carpeta `multisede-pos` a `/wp-content/plugins/`.
+2. Activa el plugin desde el menú "Plugins".
+3. Configura tus sedes en el nuevo menú "Sedes".
+
+== Changelog ==
+
+= 0.1.0 =
+* Fase 1: esqueleto del plugin, CPT Sedes, roles (Gerente de sede / Cajero) y creación de tablas.

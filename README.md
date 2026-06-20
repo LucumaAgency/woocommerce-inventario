@@ -21,7 +21,7 @@ Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas fís
 |---|---|---|
 | 1 | Esqueleto + Sedes + Roles | ✅ Implementado |
 | 2 | Inventario multi-sede | ✅ Implementado |
-| 3 | Recojo en tienda | ⏳ Pendiente |
+| 3 | Recojo en tienda | ✅ Implementado |
 | 4 | POS de mostrador | ⏳ Pendiente |
 | 5 | Caja chica | ⏳ Pendiente |
 

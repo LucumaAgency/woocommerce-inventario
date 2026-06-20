@@ -28,6 +28,10 @@ class MSP_Plugin {
 		$stock = new MSP_Stock();
 		$stock->init();
 
+		// Recojo en tienda (Fase 3).
+		$recojo = new MSP_Recojo();
+		$recojo->init();
+
 		// Asistente de configuración (wizard).
 		if ( is_admin() ) {
 			$wizard = new MSP_Wizard();

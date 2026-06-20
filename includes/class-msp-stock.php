@@ -35,10 +35,9 @@ class MSP_Stock {
 		add_action( 'woocommerce_product_options_inventory_product_data', array( $this, 'campos_producto' ) );
 		// Guardado (prioridad alta para sobreescribir el _stock que pone Woo).
 		add_action( 'woocommerce_process_product_meta', array( $this, 'guardar_producto' ), 99 );
-		// Descuento de stock al reducir el inventario de un pedido.
-		add_action( 'woocommerce_reduce_order_stock', array( $this, 'descontar_por_pedido' ) );
-		// Restitución si se restaura el stock de un pedido (cancelaciones).
-		add_action( 'woocommerce_restore_order_stock', array( $this, 'restituir_por_pedido' ) );
+		// Los pedidos con sede los gestiona el plugin (reserva/recojo/POS),
+		// así que desactivamos la reducción automática de stock de Woo para ellos.
+		add_filter( 'woocommerce_can_reduce_order_stock', array( $this, 'evitar_reduccion_woo' ), 10, 2 );
 		// Columna de stock por sede en el listado de productos.
 		add_filter( 'manage_edit-product_columns', array( $this, 'columna_listado' ), 20 );
 		add_action( 'manage_product_posts_custom_column', array( $this, 'columna_contenido' ), 20, 2 );
@@ -173,7 +172,7 @@ class MSP_Stock {
 	}
 
 	/**
-	 * Suma del stock de todas las sedes de un producto.
+	 * Suma del stock físico de todas las sedes de un producto.
 	 *
 	 * @param int $producto_id ID de producto.
 	 * @return int
@@ -190,22 +189,135 @@ class MSP_Stock {
 	}
 
 	/**
-	 * Sincroniza el stock global de WooCommerce con la suma de las sedes.
+	 * Suma de las unidades reservadas (pedidos pendientes de recojo).
+	 *
+	 * @param int $producto_id ID de producto.
+	 * @return int
+	 */
+	public static function total_reservado( $producto_id ) {
+		global $wpdb;
+		$total = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT COALESCE(SUM(stock_reservado), 0) FROM ' . self::tabla() . ' WHERE producto_id = %d',
+				$producto_id
+			)
+		);
+		return (int) $total;
+	}
+
+	/**
+	 * Reserva unidades en una sede (pedido pagado, pendiente de recojo).
+	 *
+	 * @param int $producto_id ID de producto.
+	 * @param int $sede_id     ID de sede.
+	 * @param int $cantidad    Unidades a reservar.
+	 * @return void
+	 */
+	public static function reservar( $producto_id, $sede_id, $cantidad ) {
+		global $wpdb;
+		$cantidad = max( 0, (int) $cantidad );
+		$ahora    = current_time( 'mysql' );
+
+		$wpdb->query(
+			$wpdb->prepare(
+				'INSERT INTO ' . self::tabla() . ' (producto_id, sede_id, stock, stock_reservado, updated_at)
+				 VALUES (%d, %d, 0, %d, %s)
+				 ON DUPLICATE KEY UPDATE
+				 stock_reservado = stock_reservado + %d, updated_at = VALUES(updated_at)',
+				$producto_id,
+				$sede_id,
+				$cantidad,
+				$ahora,
+				$cantidad
+			)
+		);
+	}
+
+	/**
+	 * Libera una reserva sin descontar stock (cancelación antes del recojo).
+	 *
+	 * @param int $producto_id ID de producto.
+	 * @param int $sede_id     ID de sede.
+	 * @param int $cantidad    Unidades a liberar.
+	 * @return void
+	 */
+	public static function liberar_reserva( $producto_id, $sede_id, $cantidad ) {
+		global $wpdb;
+		$cantidad = max( 0, (int) $cantidad );
+		$wpdb->query(
+			$wpdb->prepare(
+				'UPDATE ' . self::tabla() . '
+				 SET stock_reservado = GREATEST(0, stock_reservado - %d), updated_at = %s
+				 WHERE producto_id = %d AND sede_id = %d',
+				$cantidad,
+				current_time( 'mysql' ),
+				$producto_id,
+				$sede_id
+			)
+		);
+	}
+
+	/**
+	 * Confirma una reserva al recoger: descuenta stock físico y la reserva.
+	 *
+	 * @param int $producto_id ID de producto.
+	 * @param int $sede_id     ID de sede.
+	 * @param int $cantidad    Unidades recogidas.
+	 * @return void
+	 */
+	public static function confirmar_reserva( $producto_id, $sede_id, $cantidad ) {
+		global $wpdb;
+		$cantidad = max( 0, (int) $cantidad );
+		$wpdb->query(
+			$wpdb->prepare(
+				'UPDATE ' . self::tabla() . '
+				 SET stock = GREATEST(0, stock - %d),
+				     stock_reservado = GREATEST(0, stock_reservado - %d),
+				     updated_at = %s
+				 WHERE producto_id = %d AND sede_id = %d',
+				$cantidad,
+				$cantidad,
+				current_time( 'mysql' ),
+				$producto_id,
+				$sede_id
+			)
+		);
+	}
+
+	/**
+	 * Sincroniza el stock disponible de WooCommerce.
+	 *
+	 * Disponible = suma de stock físico − unidades reservadas.
 	 *
 	 * @param int $producto_id ID de producto.
 	 * @return void
 	 */
 	public static function sincronizar_woo( $producto_id ) {
-		$total   = self::total( $producto_id );
-		$product = wc_get_product( $producto_id );
+		$disponible = max( 0, self::total( $producto_id ) - self::total_reservado( $producto_id ) );
+		$product    = wc_get_product( $producto_id );
 
 		if ( ! $product ) {
 			return;
 		}
 
-		// Activamos la gestión de stock y reflejamos el total.
+		// Activamos la gestión de stock y reflejamos el disponible.
 		update_post_meta( $producto_id, '_manage_stock', 'yes' );
-		wc_update_product_stock( $product, $total, 'set' );
+		wc_update_product_stock( $product, $disponible, 'set' );
+	}
+
+	/**
+	 * Evita la reducción automática de stock de Woo en pedidos con sede:
+	 * esos los gestiona el plugin (reserva en recojo, descuento en POS).
+	 *
+	 * @param bool     $reduce Si Woo debe reducir.
+	 * @param WC_Order $order  Pedido.
+	 * @return bool
+	 */
+	public function evitar_reduccion_woo( $reduce, $order ) {
+		if ( $order && $order->get_meta( '_msp_sede_id' ) ) {
+			return false;
+		}
+		return $reduce;
 	}
 
 	/* ---------------------------------------------------------------------
@@ -291,65 +403,6 @@ class MSP_Stock {
 
 		// Sincroniza el stock global de Woo con la suma de sedes.
 		self::sincronizar_woo( $producto_id );
-	}
-
-	/* ---------------------------------------------------------------------
-	 * Descuento / restitución por pedido
-	 * ------------------------------------------------------------------- */
-
-	/**
-	 * Descuenta stock de la sede del pedido cuando Woo reduce el inventario.
-	 *
-	 * @param WC_Order $order Pedido.
-	 */
-	public function descontar_por_pedido( $order ) {
-		$sede_id = (int) $order->get_meta( '_msp_sede_id' );
-		if ( ! $sede_id ) {
-			// Sin sede asignada (se asignará en la Fase 3 de recojo / Fase 4 POS).
-			return;
-		}
-
-		foreach ( $order->get_items() as $item ) {
-			if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) {
-				continue;
-			}
-			$product = $item->get_product();
-			if ( ! $product ) {
-				continue;
-			}
-			$producto_id = $product->get_id();
-			$cantidad    = (int) $item->get_quantity();
-
-			self::ajustar( $producto_id, $sede_id, -$cantidad );
-			self::sincronizar_woo( $producto_id );
-		}
-	}
-
-	/**
-	 * Restituye stock a la sede del pedido si Woo restaura el inventario.
-	 *
-	 * @param WC_Order $order Pedido.
-	 */
-	public function restituir_por_pedido( $order ) {
-		$sede_id = (int) $order->get_meta( '_msp_sede_id' );
-		if ( ! $sede_id ) {
-			return;
-		}
-
-		foreach ( $order->get_items() as $item ) {
-			if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) {
-				continue;
-			}
-			$product = $item->get_product();
-			if ( ! $product ) {
-				continue;
-			}
-			$producto_id = $product->get_id();
-			$cantidad    = (int) $item->get_quantity();
-
-			self::ajustar( $producto_id, $sede_id, $cantidad );
-			self::sincronizar_woo( $producto_id );
-		}
 	}
 
 	/* ---------------------------------------------------------------------

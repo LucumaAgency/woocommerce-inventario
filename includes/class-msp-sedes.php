@@ -253,4 +253,32 @@ class MSP_Sedes {
 			)
 		);
 	}
+
+	/**
+	 * Helper: sedes activas habilitadas para recojo de pedidos web.
+	 *
+	 * @return WP_Post[]
+	 */
+	public static function obtener_sedes_recojo() {
+		return get_posts(
+			array(
+				'post_type'      => self::CPT,
+				'posts_per_page' => -1,
+				'post_status'    => 'publish',
+				'orderby'        => 'title',
+				'order'          => 'ASC',
+				'meta_query'     => array(
+					'relation' => 'AND',
+					array(
+						'key'   => '_msp_activa',
+						'value' => '1',
+					),
+					array(
+						'key'   => '_msp_vende_web',
+						'value' => '1',
+					),
+				),
+			)
+		);
+	}
 }

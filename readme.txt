@@ -4,7 +4,7 @@ Tags: woocommerce, inventario, multi-almacen, pos, caja
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 0.2.0
+Stable tag: 0.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,9 @@ Requiere WooCommerce activo.
 3. Configura tus sedes en el nuevo menú "Sedes".
 
 == Changelog ==
+
+= 0.3.0 =
+* Fase 3: recojo en tienda. Selección de sede de recojo en el checkout, reserva de stock al pagar, acción "Marcar como recogido" que descuenta el stock físico, liberación de reserva en cancelaciones y visualización de la sede en el pedido. El stock disponible de Woo pasa a ser stock físico menos reservado.
 
 = 0.2.0 =
 * Fase 2: inventario multi-sede. Stock por sede en la ficha de producto, sincronización del stock global de WooCommerce (suma de sedes), descuento/restitución por pedido y columna "Stock por sede" en el listado de productos.

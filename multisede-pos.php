@@ -3,7 +3,7 @@
  * Plugin Name:       Multisede POS
  * Plugin URI:        https://github.com/LucumaAgency/woocommerce-inventario
  * Description:        Inventario por sede, recojo en tienda, POS de mostrador y caja chica para WooCommerce.
- * Version:           0.1.0
+ * Version:           0.2.0
  * Author:            Lucuma Agency
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
@@ -24,7 +24,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Constantes del plugin.
-define( 'MSP_VERSION', '0.1.0' );
+define( 'MSP_VERSION', '0.2.0' );
 define( 'MSP_PLUGIN_FILE', __FILE__ );
 define( 'MSP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MSP_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -48,6 +48,7 @@ require_once MSP_PLUGIN_DIR . 'includes/class-msp-roles.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-activator.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-deactivator.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-sedes.php';
+require_once MSP_PLUGIN_DIR . 'includes/class-msp-stock.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-wizard.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-plugin.php';
 

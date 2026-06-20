@@ -20,7 +20,7 @@ Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas fís
 | Fase | Módulo | Estado |
 |---|---|---|
 | 1 | Esqueleto + Sedes + Roles | ✅ Implementado |
-| 2 | Inventario multi-sede | ⏳ Pendiente |
+| 2 | Inventario multi-sede | ✅ Implementado |
 | 3 | Recojo en tienda | ⏳ Pendiente |
 | 4 | POS de mostrador | ⏳ Pendiente |
 | 5 | Caja chica | ⏳ Pendiente |

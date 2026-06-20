@@ -24,6 +24,10 @@ class MSP_Plugin {
 		$sedes = new MSP_Sedes();
 		$sedes->init();
 
+		// Inventario multi-sede (Fase 2).
+		$stock = new MSP_Stock();
+		$stock->init();
+
 		// Asistente de configuración (wizard).
 		if ( is_admin() ) {
 			$wizard = new MSP_Wizard();

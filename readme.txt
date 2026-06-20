@@ -4,7 +4,7 @@ Tags: woocommerce, inventario, multi-almacen, pos, caja
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 0.1.0
+Stable tag: 0.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,9 @@ Requiere WooCommerce activo.
 3. Configura tus sedes en el nuevo menú "Sedes".
 
 == Changelog ==
+
+= 0.2.0 =
+* Fase 2: inventario multi-sede. Stock por sede en la ficha de producto, sincronización del stock global de WooCommerce (suma de sedes), descuento/restitución por pedido y columna "Stock por sede" en el listado de productos.
 
 = 0.1.0 =
 * Fase 1: esqueleto del plugin, CPT Sedes, roles (Gerente de sede / Cajero) y creación de tablas.

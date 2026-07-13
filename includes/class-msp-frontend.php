@@ -183,6 +183,16 @@ class MSP_Frontend {
 		if ( is_admin() && ! wp_doing_ajax() ) {
 			return 0;
 		}
+
+		// El POS trabaja contra la sede elegida en su pantalla, no contra la
+		// que el cajero tenga guardada en la sesión de la tienda online.
+		if ( wp_doing_ajax() && isset( $_REQUEST['action'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$accion = sanitize_key( wp_unslash( $_REQUEST['action'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			if ( 0 === strpos( $accion, 'msp_pos_' ) ) {
+				return 0;
+			}
+		}
+
 		return self::sede_activa();
 	}
 
@@ -196,6 +206,10 @@ class MSP_Frontend {
 	public function stock_de_sede( $qty, $product ) {
 		$sede = $this->sede_para_front();
 		if ( ! $sede ) {
+			return $qty;
+		}
+		// El padre de un variable no gestiona stock propio: lo hacen sus variaciones.
+		if ( $product->is_type( 'variable' ) ) {
 			return $qty;
 		}
 		return MSP_Stock::disponible_sede( $product->get_id(), $sede );
@@ -213,7 +227,7 @@ class MSP_Frontend {
 		if ( ! $sede ) {
 			return $in_stock;
 		}
-		return MSP_Stock::disponible_sede( $product->get_id(), $sede ) > 0;
+		return MSP_Stock::disponible_producto( $product, $sede ) > 0;
 	}
 
 	/**
@@ -228,7 +242,7 @@ class MSP_Frontend {
 		if ( ! $sede ) {
 			return $text;
 		}
-		$disp = MSP_Stock::disponible_sede( $product->get_id(), $sede );
+		$disp = MSP_Stock::disponible_producto( $product, $sede );
 		if ( $disp > 0 ) {
 			/* translators: %d: unidades disponibles. */
 			return sprintf( esc_html__( '%d disponibles en esta tienda', 'multisede-pos' ), $disp );

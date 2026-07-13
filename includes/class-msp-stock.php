@@ -35,6 +35,9 @@ class MSP_Stock {
 		add_action( 'woocommerce_product_options_inventory_product_data', array( $this, 'campos_producto' ) );
 		// Guardado (prioridad alta para sobreescribir el _stock que pone Woo).
 		add_action( 'woocommerce_process_product_meta', array( $this, 'guardar_producto' ), 99 );
+		// UI y guardado del stock por sede de cada variación.
+		add_action( 'woocommerce_variation_options_inventory', array( $this, 'campos_variacion' ), 10, 3 );
+		add_action( 'woocommerce_save_product_variation', array( $this, 'guardar_variacion' ), 99, 2 );
 		// Los pedidos con sede los gestiona el plugin (reserva/recojo/POS),
 		// así que desactivamos la reducción automática de stock de Woo para ellos.
 		add_filter( 'woocommerce_can_reduce_order_stock', array( $this, 'evitar_reduccion_woo' ), 10, 2 );
@@ -191,6 +194,67 @@ class MSP_Stock {
 			return 0;
 		}
 		return max( 0, (int) $fila->stock - (int) $fila->stock_reservado );
+	}
+
+	/**
+	 * Disponible de un producto en una sede, contando variaciones.
+	 *
+	 * Un producto variable no tiene stock propio: su disponible es la suma
+	 * del disponible de sus variaciones.
+	 *
+	 * @param WC_Product $product Producto.
+	 * @param int        $sede_id ID de sede.
+	 * @return int
+	 */
+	public static function disponible_producto( $product, $sede_id ) {
+		if ( ! $product instanceof WC_Product ) {
+			return 0;
+		}
+
+		if ( $product->is_type( 'variable' ) ) {
+			$total = 0;
+			foreach ( $product->get_children() as $variacion_id ) {
+				$total += self::disponible_sede( $variacion_id, $sede_id );
+			}
+			return $total;
+		}
+
+		return self::disponible_sede( $product->get_id(), $sede_id );
+	}
+
+	/**
+	 * Descuenta stock de una sede solo si hay disponible suficiente.
+	 *
+	 * La condición y el descuento ocurren en la misma sentencia SQL, así que
+	 * dos cajeros vendiendo a la vez no pueden sobrevender: el segundo no
+	 * afecta ninguna fila y recibe false.
+	 *
+	 * @param int $producto_id ID de producto/variación.
+	 * @param int $sede_id     ID de sede.
+	 * @param int $cantidad    Unidades a descontar (positivas).
+	 * @return bool True si se descontó; false si no había disponible.
+	 */
+	public static function descontar_si_hay( $producto_id, $sede_id, $cantidad ) {
+		global $wpdb;
+		$cantidad = max( 0, (int) $cantidad );
+		if ( ! $cantidad ) {
+			return true;
+		}
+
+		$filas = $wpdb->query(
+			$wpdb->prepare(
+				'UPDATE ' . self::tabla() . '
+				 SET stock = stock - %d, updated_at = %s
+				 WHERE producto_id = %d AND sede_id = %d AND (stock - stock_reservado) >= %d',
+				$cantidad,
+				current_time( 'mysql' ),
+				$producto_id,
+				$sede_id,
+				$cantidad
+			)
+		);
+
+		return $filas > 0;
 	}
 
 	/**
@@ -354,7 +418,8 @@ class MSP_Stock {
 
 		$sedes = MSP_Sedes::obtener_sedes_activas();
 
-		echo '<div class="options_group msp-stock-sedes">';
+		// En productos variables el stock vive en cada variación, no en el padre.
+		echo '<div class="options_group msp-stock-sedes show_if_simple">';
 		echo '<p class="form-field"><strong>' . esc_html__( 'Stock por sede (Multisede POS)', 'multisede-pos' ) . '</strong></p>';
 
 		if ( empty( $sedes ) ) {
@@ -428,6 +493,89 @@ class MSP_Stock {
 	}
 
 	/* ---------------------------------------------------------------------
+	 * UI en cada variación
+	 * ------------------------------------------------------------------- */
+
+	/**
+	 * Pinta los campos de stock por sede dentro de una variación.
+	 *
+	 * @param int     $loop      Índice de la variación en el formulario.
+	 * @param array   $variation Datos de la variación.
+	 * @param WP_Post $post      Post de la variación.
+	 */
+	public function campos_variacion( $loop, $variation, $post ) {
+		$sedes = MSP_Sedes::obtener_sedes_activas();
+		if ( empty( $sedes ) ) {
+			return;
+		}
+
+		$variacion_id = (int) $post->ID;
+		$por_sede     = self::por_sede( $variacion_id );
+
+		echo '<div class="msp-stock-sedes-variacion" style="clear:both;padding-top:8px">';
+		echo '<p class="form-row form-row-full"><strong>' .
+			esc_html__( 'Stock por sede (Multisede POS)', 'multisede-pos' ) . '</strong></p>';
+
+		foreach ( $sedes as $sede ) {
+			$stock_actual = isset( $por_sede[ $sede->ID ] ) ? $por_sede[ $sede->ID ]['stock'] : 0;
+			$reservado    = isset( $por_sede[ $sede->ID ] ) ? $por_sede[ $sede->ID ]['reservado'] : 0;
+
+			woocommerce_wp_text_input(
+				array(
+					'id'                => 'msp_stock_var_' . $variacion_id . '_' . $sede->ID,
+					'name'              => 'msp_stock_var[' . $variacion_id . '][' . $sede->ID . ']',
+					'label'             => $sede->post_title,
+					'value'             => $stock_actual,
+					'type'              => 'number',
+					'wrapper_class'     => 'form-row form-row-first',
+					'desc_tip'          => true,
+					'description'       => $reservado > 0
+						/* translators: %d: unidades reservadas. */
+						? sprintf( esc_html__( 'Reservado por pedidos pendientes de recojo: %d', 'multisede-pos' ), $reservado )
+						: esc_html__( 'Existencias de esta variación en esta sede.', 'multisede-pos' ),
+					'custom_attributes' => array(
+						'step' => '1',
+						'min'  => '0',
+					),
+				)
+			);
+		}
+		echo '</div>';
+	}
+
+	/**
+	 * Guarda el stock por sede de una variación.
+	 *
+	 * @param int $variacion_id ID de la variación.
+	 * @param int $loop         Índice en el formulario.
+	 */
+	public function guardar_variacion( $variacion_id, $loop ) {
+		// Nonce de WooCommerce (guardado del producto y guardado AJAX de variaciones).
+		if ( ! isset( $_POST['security'] ) && ! isset( $_POST['woocommerce_meta_nonce'] ) ) {
+			return;
+		}
+		if ( ! current_user_can( 'edit_post', $variacion_id ) ) {
+			return;
+		}
+
+		if ( ! isset( $_POST['msp_stock_var'][ $variacion_id ] ) || ! is_array( $_POST['msp_stock_var'][ $variacion_id ] ) ) {
+			return;
+		}
+
+		$valores = wp_unslash( $_POST['msp_stock_var'][ $variacion_id ] ); // phpcs:ignore WordPress.Security.ValidatedSanitized
+
+		foreach ( $valores as $sede_id => $stock ) {
+			$sede_id = absint( $sede_id );
+			if ( ! $sede_id ) {
+				continue;
+			}
+			self::set( $variacion_id, $sede_id, absint( $stock ) );
+		}
+
+		self::sincronizar_woo( $variacion_id );
+	}
+
+	/* ---------------------------------------------------------------------
 	 * Columna en el listado de productos
 	 * ------------------------------------------------------------------- */
 
@@ -463,7 +611,27 @@ class MSP_Stock {
 			return;
 		}
 
-		$por_sede = self::por_sede( $producto_id );
+		$product = wc_get_product( $producto_id );
+
+		// En variables, el stock de la sede es la suma de sus variaciones.
+		if ( $product && $product->is_type( 'variable' ) ) {
+			$por_sede = array();
+			foreach ( $product->get_children() as $variacion_id ) {
+				foreach ( self::por_sede( $variacion_id ) as $sede_id => $datos ) {
+					if ( ! isset( $por_sede[ $sede_id ] ) ) {
+						$por_sede[ $sede_id ] = array(
+							'stock'     => 0,
+							'reservado' => 0,
+						);
+					}
+					$por_sede[ $sede_id ]['stock']     += $datos['stock'];
+					$por_sede[ $sede_id ]['reservado'] += $datos['reservado'];
+				}
+			}
+		} else {
+			$por_sede = self::por_sede( $producto_id );
+		}
+
 		if ( empty( $por_sede ) ) {
 			echo '<span style="color:#999">—</span>';
 			return;

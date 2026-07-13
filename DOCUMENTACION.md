@@ -126,6 +126,7 @@ Prefijo de código: `msp_` / `MSP_`. Textdomain: `multisede-pos`.
 | `monto_cierre_contado` | Lo que cuenta el cajero |
 | `diferencia` | `contado − esperado` (arqueo) |
 | `estado` | `abierta` / `cerrada` |
+| `es_practica` | `1` si es la caja de práctica del asistente: se excluye de reportes y de las ventas del POS |
 | `abierta_at`, `cerrada_at` | Marcas de tiempo |
 
 **`wp_msp_caja_movimientos`** — entradas y salidas de efectivo:
@@ -205,6 +206,8 @@ El listado de Usuarios muestra una columna **Sedes**, que marca en rojo "Sin asi
 
 **Al tocar las capacidades de un rol hay que subir esa constante**, o los usuarios existentes se quedarán con las capacidades viejas.
 
+Lo mismo vale para el **esquema de la base de datos**: `MSP_Activator::migrar_db()` compara `MSP_Activator::DB_VERSION` contra la opción `msp_db_version` y vuelve a pasar `dbDelta` si cambió. **Al añadir o cambiar una columna hay que subir `DB_VERSION`**, o la columna nueva no llegará a las instalaciones ya existentes (solo a las que se activen desde cero).
+
 ---
 
 ## 7. Los módulos en detalle
@@ -256,7 +259,14 @@ Añade los campos de stock por sede en la pestaña **Inventario** del producto (
 Pantalla **Inventario** (capacidad `msp_ver_stock`; ajustar requiere `msp_gestionar_stock`). Muestra, para la sede elegida, el stock, lo reservado y lo disponible de cada producto, con buscador por nombre o SKU y paginación. Los productos variables se listan con una fila por variación. El ajuste es **absoluto** (se escribe el total que hay, no lo que entró) y sincroniza el espejo de Woo. Existe para que el gerente gestione inventario sin permisos sobre el catálogo.
 
 ### MSP_Wizard
-Asistente que aparece al activar, en cuatro pasos: bienvenida (chequea WooCommerce), alta de sedes, **asignación del personal a sus sedes** y recojo en tienda. Al finalizar lleva a la página de Ayuda. Se puede volver a abrir desde ahí.
+Asistente que aparece al activar, en cinco pasos: bienvenida (chequea WooCommerce), alta de sedes, **asignación del personal a sus sedes**, recojo en tienda y **práctica de un turno de caja**. Al finalizar lleva a la página de Ayuda, desde donde se puede volver a abrir.
+
+El paso 5 guía un turno **real** (abrir caja → registrar un movimiento → cerrar con arqueo) usando las mismas funciones de `MSP_Caja` que la caja de verdad, pero sobre una sesión marcada con `es_practica = 1`. Esa marca la aísla por completo:
+
+- **No aparece** en el historial de arqueos (`tabla_reportes` filtra `es_practica = 0`).
+- **No recibe** el efectivo de las ventas del POS: `sesion_abierta()` — que es la que consulta el POS al registrar una venta en efectivo — solo devuelve sesiones reales. Sin esto, una caja de práctica olvidada abierta se habría tragado la recaudación del turno.
+- **No bloquea** la apertura de la caja real: el chequeo de "ya hay una caja abierta" compara contra el mismo tipo de sesión.
+- Se puede **borrar** con `descartar_practica()`, que solo toca sesiones con `es_practica = 1` del propio usuario, así que nunca puede destruir un arqueo real.
 
 ### MSP_Ayuda
 Página **Ayuda** (capacidad `msp_ver_stock`), el manual de uso dentro del propio panel. Explica el modelo de stock (físico / reservado / disponible) y los flujos del día a día: abrir caja, vender en el POS, entregar un pedido web, ajustar inventario y cerrar caja con arqueo. El contenido se filtra por capacidades, así que cada rol solo ve lo que le toca, y el administrador ve además la checklist de puesta en marcha. Avisa a quien no tenga sedes asignadas.
@@ -334,6 +344,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.1.0** | Compra por tienda (la web opera por sede) |
 | **1.2.0** | Stock disponible y descuento atómico en el POS, reversa de caja al anular una venta, soporte de productos variables |
 | **1.3.0** | Asignación usuario↔sede, roles funcionales, pantalla de Inventario, asistente ampliado y página de Ayuda |
+| **1.4.0** | Paso de práctica de caja en el asistente (turno real, aislado y borrable) y migración automática del esquema al actualizar |
 
 ---
 

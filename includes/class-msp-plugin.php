@@ -20,6 +20,10 @@ class MSP_Plugin {
 	public function run() {
 		add_action( 'init', array( $this, 'cargar_textdomain' ) );
 
+		// Aplica cambios de esquema al actualizar (Git Updater no dispara el
+		// hook de activación).
+		add_action( 'init', array( 'MSP_Activator', 'migrar_db' ), 1 );
+
 		// Roles, capacidades y asignación usuario↔sede.
 		$roles = new MSP_Roles();
 		$roles->init();

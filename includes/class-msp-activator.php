@@ -17,7 +17,37 @@ class MSP_Activator {
 	/**
 	 * Versión del esquema de base de datos.
 	 */
-	const DB_VERSION = '1';
+	const DB_VERSION = '2';
+
+	/**
+	 * Aplica el esquema si cambió desde la última vez.
+	 *
+	 * Git Updater no dispara el hook de activación al actualizar, así que sin
+	 * esto una columna nueva no llegaría nunca a las instalaciones existentes.
+	 * dbDelta es idempotente: si el esquema ya está al día, no hace nada.
+	 *
+	 * Corre en CUALQUIER tipo de petición (incluidas AJAX y cron) a propósito.
+	 * Restringirlo al admin dejaba una ventana entre la actualización y la
+	 * primera carga del panel en la que el código ya consultaba columnas que
+	 * todavía no existían: un cobro del POS (que va por AJAX) fallaba en
+	 * silencio y el efectivo de esa venta no entraba a la caja.
+	 */
+	public static function migrar_db() {
+		if ( get_option( 'msp_db_version' ) === self::DB_VERSION ) {
+			return;
+		}
+
+		// Lock para que dos peticiones simultáneas no lancen dbDelta a la vez.
+		if ( get_transient( 'msp_migrando_db' ) ) {
+			return;
+		}
+		set_transient( 'msp_migrando_db', 1, 30 );
+
+		self::crear_tablas();
+		update_option( 'msp_db_version', self::DB_VERSION );
+
+		delete_transient( 'msp_migrando_db' );
+	}
 
 	/**
 	 * Punto de entrada de activación.
@@ -74,12 +104,14 @@ class MSP_Activator {
 			monto_cierre_contado DECIMAL(10,2) NULL DEFAULT NULL,
 			diferencia DECIMAL(10,2) NULL DEFAULT NULL,
 			estado VARCHAR(20) NOT NULL DEFAULT 'abierta',
+			es_practica TINYINT(1) NOT NULL DEFAULT 0,
 			abierta_at DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
 			cerrada_at DATETIME NULL DEFAULT NULL,
 			PRIMARY KEY  (id),
 			KEY sede_id (sede_id),
 			KEY cajero_id (cajero_id),
-			KEY estado (estado)
+			KEY estado (estado),
+			KEY es_practica (es_practica)
 		) {$charset_collate};";
 
 		// Movimientos de caja.

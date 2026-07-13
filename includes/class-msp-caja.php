@@ -49,21 +49,49 @@ class MSP_Caja {
 	 * ------------------------------------------------------------------- */
 
 	/**
-	 * Devuelve la sesión abierta de un cajero en una sede, si existe.
+	 * Devuelve la sesión de caja REAL abierta de un cajero en una sede.
+	 *
+	 * Excluye a propósito las sesiones de práctica del asistente: si no, una
+	 * caja de práctica olvidada abierta se tragaría el efectivo de las ventas
+	 * reales del POS y bloquearía la apertura de la caja del turno.
 	 *
 	 * @param int $sede_id   ID de sede.
 	 * @param int $cajero_id ID de usuario.
 	 * @return object|null
 	 */
 	public static function sesion_abierta( $sede_id, $cajero_id ) {
+		return self::buscar_sesion_abierta( $sede_id, $cajero_id, 0 );
+	}
+
+	/**
+	 * Devuelve la sesión de PRÁCTICA abierta de un usuario en una sede.
+	 *
+	 * @param int $sede_id   ID de sede.
+	 * @param int $cajero_id ID de usuario.
+	 * @return object|null
+	 */
+	public static function sesion_practica_abierta( $sede_id, $cajero_id ) {
+		return self::buscar_sesion_abierta( $sede_id, $cajero_id, 1 );
+	}
+
+	/**
+	 * Busca una sesión abierta, real o de práctica.
+	 *
+	 * @param int $sede_id     Sede.
+	 * @param int $cajero_id   Usuario.
+	 * @param int $es_practica 0 = real, 1 = práctica.
+	 * @return object|null
+	 */
+	private static function buscar_sesion_abierta( $sede_id, $cajero_id, $es_practica ) {
 		global $wpdb;
 		return $wpdb->get_row(
 			$wpdb->prepare(
 				'SELECT * FROM ' . self::tabla_sesiones() . "
-				 WHERE sede_id = %d AND cajero_id = %d AND estado = 'abierta'
+				 WHERE sede_id = %d AND cajero_id = %d AND estado = 'abierta' AND es_practica = %d
 				 ORDER BY id DESC LIMIT 1",
 				$sede_id,
-				$cajero_id
+				$cajero_id,
+				$es_practica
 			)
 		);
 	}
@@ -71,15 +99,18 @@ class MSP_Caja {
 	/**
 	 * Abre una caja.
 	 *
-	 * @param int   $sede_id   Sede.
-	 * @param int   $cajero_id Cajero.
-	 * @param float $apertura  Monto de apertura.
-	 * @return int|false ID de la sesión o false si ya hay una abierta.
+	 * @param int   $sede_id     Sede.
+	 * @param int   $cajero_id   Cajero.
+	 * @param float $apertura    Monto de apertura.
+	 * @param bool  $es_practica Si es una caja de práctica del asistente.
+	 * @return int|false ID de la sesión o false si ya hay una abierta del mismo tipo.
 	 */
-	public static function abrir( $sede_id, $cajero_id, $apertura ) {
+	public static function abrir( $sede_id, $cajero_id, $apertura, $es_practica = false ) {
 		global $wpdb;
 
-		if ( self::sesion_abierta( $sede_id, $cajero_id ) ) {
+		$es_practica = $es_practica ? 1 : 0;
+
+		if ( self::buscar_sesion_abierta( $sede_id, $cajero_id, $es_practica ) ) {
 			return false;
 		}
 
@@ -90,12 +121,65 @@ class MSP_Caja {
 				'cajero_id'      => $cajero_id,
 				'monto_apertura' => round( (float) $apertura, 2 ),
 				'estado'         => 'abierta',
+				'es_practica'    => $es_practica,
 				'abierta_at'     => current_time( 'mysql' ),
 			),
-			array( '%d', '%d', '%f', '%s', '%s' )
+			array( '%d', '%d', '%f', '%s', '%d', '%s' )
 		);
 
 		return (int) $wpdb->insert_id;
+	}
+
+	/**
+	 * Última sesión de práctica de un usuario en una sede, abierta o cerrada.
+	 *
+	 * @param int $sede_id   Sede.
+	 * @param int $cajero_id Usuario.
+	 * @return object|null
+	 */
+	public static function ultima_practica( $sede_id, $cajero_id ) {
+		global $wpdb;
+		return $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT * FROM ' . self::tabla_sesiones() . '
+				 WHERE sede_id = %d AND cajero_id = %d AND es_practica = 1
+				 ORDER BY id DESC LIMIT 1',
+				$sede_id,
+				$cajero_id
+			)
+		);
+	}
+
+	/**
+	 * Borra una sesión de práctica y sus movimientos.
+	 *
+	 * Solo borra sesiones marcadas como práctica y del propio usuario: nunca
+	 * puede tocar un arqueo real.
+	 *
+	 * @param int $sesion_id Sesión.
+	 * @param int $cajero_id Usuario que la creó.
+	 * @return bool
+	 */
+	public static function descartar_practica( $sesion_id, $cajero_id ) {
+		global $wpdb;
+
+		$sesion = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT * FROM ' . self::tabla_sesiones() . '
+				 WHERE id = %d AND cajero_id = %d AND es_practica = 1',
+				$sesion_id,
+				$cajero_id
+			)
+		);
+
+		if ( ! $sesion ) {
+			return false;
+		}
+
+		$wpdb->delete( self::tabla_movimientos(), array( 'sesion_id' => $sesion->id ), array( '%d' ) );
+		$wpdb->delete( self::tabla_sesiones(), array( 'id' => $sesion->id ), array( '%d' ) );
+
+		return true;
 	}
 
 	/**
@@ -650,10 +734,11 @@ class MSP_Caja {
 			return;
 		}
 
+		// Las cajas de práctica del asistente no son contabilidad: fuera del reporte.
 		$sesiones = $wpdb->get_results(
 			$wpdb->prepare(
 				'SELECT * FROM ' . self::tabla_sesiones() . "
-				 WHERE sede_id = %d AND estado = 'cerrada'
+				 WHERE sede_id = %d AND estado = 'cerrada' AND es_practica = 0
 				 ORDER BY cerrada_at DESC LIMIT 15",
 				$sede_id
 			)

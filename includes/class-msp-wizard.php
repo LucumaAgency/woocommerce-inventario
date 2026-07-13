@@ -119,11 +119,115 @@ class MSP_Wizard {
 			exit;
 		}
 
+		if ( 0 === strpos( $accion, 'practica_' ) ) {
+			$this->procesar_practica( $accion );
+			exit;
+		}
+
 		if ( 'finalizar' === $accion ) {
 			update_option( self::OPT_DONE, 1 );
 			wp_safe_redirect( admin_url( 'admin.php?page=' . MSP_Ayuda::PAGE ) );
 			exit;
 		}
+	}
+
+	/**
+	 * Procesa el turno de caja de práctica (paso 5).
+	 *
+	 * Usa las mismas funciones que la caja real, pero sobre una sesión marcada
+	 * como práctica: no aparece en el reporte de arqueos, no recibe el efectivo
+	 * de las ventas del POS y se puede borrar de un clic.
+	 *
+	 * @param string $accion Acción del formulario.
+	 */
+	private function procesar_practica( $accion ) {
+		$sede_id   = isset( $_POST['sede'] ) ? absint( wp_unslash( $_POST['sede'] ) ) : 0;
+		$cajero_id = get_current_user_id();
+
+		// La sede tiene que ser una sede real de mostrador: es la única acción
+		// del plugin que escribe en la tabla de cajas, no la dejamos apuntar a
+		// un ID de post cualquiera.
+		if ( ! $sede_id || ! $this->es_sede_con_caja( $sede_id ) ) {
+			wp_safe_redirect( $this->url_practica( 0 ) );
+			return;
+		}
+
+		if ( 'practica_abrir' === $accion ) {
+			$apertura = isset( $_POST['monto_apertura'] ) ? (float) wp_unslash( $_POST['monto_apertura'] ) : 0;
+			MSP_Caja::abrir( $sede_id, $cajero_id, $apertura, true );
+
+		} elseif ( 'practica_mov' === $accion ) {
+			$sesion = MSP_Caja::sesion_practica_abierta( $sede_id, $cajero_id );
+			if ( $sesion ) {
+				$tipo     = isset( $_POST['tipo'] ) && 'egreso' === $_POST['tipo'] ? 'egreso' : 'ingreso';
+				$concepto = isset( $_POST['concepto'] ) ? sanitize_text_field( wp_unslash( $_POST['concepto'] ) ) : '';
+				$monto    = isset( $_POST['monto'] ) ? (float) wp_unslash( $_POST['monto'] ) : 0;
+				if ( $monto > 0 ) {
+					MSP_Caja::agregar_movimiento( $sesion->id, $tipo, $concepto, $monto );
+				}
+			}
+		} elseif ( 'practica_cerrar' === $accion ) {
+			$sesion = MSP_Caja::sesion_practica_abierta( $sede_id, $cajero_id );
+			if ( $sesion ) {
+				$contado = isset( $_POST['monto_contado'] ) ? (float) wp_unslash( $_POST['monto_contado'] ) : 0;
+				MSP_Caja::cerrar( $sesion, $contado );
+			}
+		} elseif ( 'practica_descartar' === $accion ) {
+			$sesion_id = isset( $_POST['sesion'] ) ? absint( wp_unslash( $_POST['sesion'] ) ) : 0;
+			if ( $sesion_id ) {
+				MSP_Caja::descartar_practica( $sesion_id, $cajero_id );
+			}
+		}
+
+		wp_safe_redirect( $this->url_practica( $sede_id ) );
+	}
+
+	/**
+	 * Sedes activas que venden en mostrador (las que tienen caja).
+	 *
+	 * @return WP_Post[]
+	 */
+	private function sedes_con_caja() {
+		return array_values(
+			array_filter(
+				MSP_Sedes::obtener_sedes_activas(),
+				function ( $sede ) {
+					return '1' === get_post_meta( $sede->ID, '_msp_vende_mostrador', true );
+				}
+			)
+		);
+	}
+
+	/**
+	 * ¿Es esa sede una sede activa con caja?
+	 *
+	 * @param int $sede_id Sede.
+	 * @return bool
+	 */
+	private function es_sede_con_caja( $sede_id ) {
+		foreach ( $this->sedes_con_caja() as $sede ) {
+			if ( (int) $sede->ID === (int) $sede_id ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * URL del paso de práctica para una sede.
+	 *
+	 * @param int $sede_id Sede.
+	 * @return string
+	 */
+	private function url_practica( $sede_id ) {
+		return add_query_arg(
+			array(
+				'page' => self::PAGE,
+				'step' => 5,
+				'sede' => $sede_id,
+			),
+			admin_url( 'admin.php' )
+		);
 	}
 
 	/**
@@ -198,6 +302,9 @@ class MSP_Wizard {
 					case 4:
 						$this->paso_recojo();
 						break;
+					case 5:
+						$this->paso_practica();
+						break;
 					case 1:
 					default:
 						$this->paso_bienvenida();
@@ -219,7 +326,8 @@ class MSP_Wizard {
 			1 => __( 'Bienvenida', 'multisede-pos' ),
 			2 => __( 'Sedes', 'multisede-pos' ),
 			3 => __( 'Personal', 'multisede-pos' ),
-			4 => __( 'Recojo y fin', 'multisede-pos' ),
+			4 => __( 'Recojo', 'multisede-pos' ),
+			5 => __( 'Practicar caja', 'multisede-pos' ),
 		);
 		echo '<div style="display:flex;gap:8px;margin-top:12px">';
 		foreach ( $pasos as $n => $label ) {
@@ -449,7 +557,247 @@ class MSP_Wizard {
 	}
 
 	/**
-	 * Paso 4: recojo en tienda y finalización.
+	 * Paso 5: practicar un turno de caja completo (apertura → movimiento → arqueo).
+	 */
+	private function paso_practica() {
+		$cajero_id = get_current_user_id();
+
+		// Solo sedes de mostrador: son las que tienen caja.
+		$sedes = $this->sedes_con_caja();
+
+		echo '<h2>' . esc_html__( 'Practica un turno de caja', 'multisede-pos' ) . '</h2>';
+		echo '<p>' . esc_html__( 'Vamos a abrir una caja, registrar un gasto y cerrarla con arqueo, igual que hará el cajero cada día. Es una caja de práctica de verdad, pero marcada como tal: no entra en el reporte de arqueos, no recibe el efectivo de las ventas del POS y la puedes borrar al terminar.', 'multisede-pos' ) . '</p>';
+
+		if ( empty( $sedes ) ) {
+			echo '<div class="notice notice-warning inline"><p>' .
+				esc_html__( 'No hay ninguna sede que venda en mostrador, así que no hay caja que practicar. Marca "Vende en mostrador (POS)" en alguna de tus sedes.', 'multisede-pos' ) .
+				'</p></div>';
+			$this->boton_finalizar();
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$sede_id = isset( $_GET['sede'] ) ? absint( wp_unslash( $_GET['sede'] ) ) : 0;
+		if ( ! $sede_id || ! $this->es_sede_con_caja( $sede_id ) ) {
+			$sede_id = (int) $sedes[0]->ID;
+		}
+
+		// Selector de sede.
+		echo '<form method="get" style="margin:16px 0">';
+		echo '<input type="hidden" name="page" value="' . esc_attr( self::PAGE ) . '" />';
+		echo '<input type="hidden" name="step" value="5" />';
+		echo '<label><strong>' . esc_html__( 'Sede:', 'multisede-pos' ) . '</strong> <select name="sede" onchange="this.form.submit()">';
+		foreach ( $sedes as $sede ) {
+			echo '<option value="' . esc_attr( $sede->ID ) . '" ' . selected( $sede->ID, $sede_id, false ) . '>' .
+				esc_html( $sede->post_title ) . '</option>';
+		}
+		echo '</select></label></form>';
+
+		$abierta = MSP_Caja::sesion_practica_abierta( $sede_id, $cajero_id );
+
+		if ( $abierta ) {
+			$this->practica_en_curso( $abierta, $sede_id );
+		} else {
+			$ultima = MSP_Caja::ultima_practica( $sede_id, $cajero_id );
+			if ( $ultima && 'cerrada' === $ultima->estado ) {
+				$this->practica_cerrada( $ultima, $sede_id );
+			} else {
+				$this->practica_abrir( $sede_id );
+			}
+		}
+
+		$this->boton_finalizar();
+	}
+
+	/**
+	 * Práctica, paso 1: abrir la caja.
+	 *
+	 * @param int $sede_id Sede.
+	 */
+	private function practica_abrir( $sede_id ) {
+		?>
+		<div style="border:1px solid #dcdcde;border-left:4px solid #1C8E80;border-radius:6px;padding:16px 20px">
+			<h3 style="margin-top:0"><?php esc_html_e( 'Paso 1 de 3 — Abrir la caja', 'multisede-pos' ); ?></h3>
+			<p><?php esc_html_e( 'Al empezar el turno, el cajero cuenta el efectivo con el que arranca y lo registra. Ese es el monto de apertura.', 'multisede-pos' ); ?></p>
+			<form method="post">
+				<?php wp_nonce_field( 'msp_wizard', 'msp_wizard_nonce' ); ?>
+				<input type="hidden" name="msp_wizard_action" value="practica_abrir" />
+				<input type="hidden" name="sede" value="<?php echo esc_attr( $sede_id ); ?>" />
+				<p>
+					<label><?php esc_html_e( 'Monto de apertura', 'multisede-pos' ); ?><br>
+						<input type="number" step="0.01" min="0" name="monto_apertura" value="100" required class="regular-text" />
+					</label>
+				</p>
+				<button type="submit" class="button button-primary"><?php esc_html_e( 'Abrir caja de práctica', 'multisede-pos' ); ?></button>
+			</form>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Práctica, pasos 2 y 3: movimientos y arqueo.
+	 *
+	 * @param object $sesion  Sesión de práctica abierta.
+	 * @param int    $sede_id Sede.
+	 */
+	private function practica_en_curso( $sesion, $sede_id ) {
+		$totales  = MSP_Caja::totales( $sesion->id );
+		$esperado = MSP_Caja::esperado( $sesion );
+		$movs     = MSP_Caja::movimientos( $sesion->id );
+		?>
+		<div style="border:1px solid #dcdcde;border-left:4px solid #1C8E80;border-radius:6px;padding:16px 20px;margin-bottom:16px">
+			<h3 style="margin-top:0"><?php esc_html_e( 'Paso 2 de 3 — Registrar un movimiento', 'multisede-pos' ); ?></h3>
+			<p><?php esc_html_e( 'Durante el turno entra y sale plata del cajón que no son ventas: un gasto pagado del cajón es un egreso, plata que se mete es un ingreso. Registra uno de prueba, por ejemplo un taxi de 20.', 'multisede-pos' ); ?></p>
+			<form method="post" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+				<?php wp_nonce_field( 'msp_wizard', 'msp_wizard_nonce' ); ?>
+				<input type="hidden" name="msp_wizard_action" value="practica_mov" />
+				<input type="hidden" name="sede" value="<?php echo esc_attr( $sede_id ); ?>" />
+				<select name="tipo">
+					<option value="egreso"><?php esc_html_e( 'Egreso (gasto)', 'multisede-pos' ); ?></option>
+					<option value="ingreso"><?php esc_html_e( 'Ingreso', 'multisede-pos' ); ?></option>
+				</select>
+				<input type="text" name="concepto" value="<?php esc_attr_e( 'Taxi', 'multisede-pos' ); ?>" />
+				<input type="number" step="0.01" min="0" name="monto" value="20" required style="width:110px" />
+				<button type="submit" class="button"><?php esc_html_e( 'Registrar', 'multisede-pos' ); ?></button>
+			</form>
+
+			<?php if ( $movs ) : ?>
+				<table class="widefat striped" style="margin-top:14px">
+					<tbody>
+						<?php foreach ( $movs as $m ) : ?>
+							<tr>
+								<td><?php echo esc_html( $m->concepto ); ?></td>
+								<td style="width:120px">
+									<?php echo esc_html( 'egreso' === $m->tipo ? '−' : '+' ); ?><?php echo wp_kses_post( wc_price( $m->monto ) ); ?>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			<?php endif; ?>
+		</div>
+
+		<div style="border:1px solid #dcdcde;border-left:4px solid #1C8E80;border-radius:6px;padding:16px 20px">
+			<h3 style="margin-top:0"><?php esc_html_e( 'Paso 3 de 3 — Cerrar con arqueo', 'multisede-pos' ); ?></h3>
+
+			<table class="widefat striped" style="max-width:420px;margin-bottom:14px">
+				<tbody>
+					<tr>
+						<td><?php esc_html_e( 'Apertura', 'multisede-pos' ); ?></td>
+						<td><?php echo wp_kses_post( wc_price( $sesion->monto_apertura ) ); ?></td>
+					</tr>
+					<tr>
+						<td><?php esc_html_e( 'Ventas en efectivo', 'multisede-pos' ); ?></td>
+						<td><?php echo wp_kses_post( wc_price( $totales['ventas'] ) ); ?></td>
+					</tr>
+					<tr>
+						<td><?php esc_html_e( 'Otros ingresos', 'multisede-pos' ); ?></td>
+						<td><?php echo wp_kses_post( wc_price( $totales['ingresos'] ) ); ?></td>
+					</tr>
+					<tr>
+						<td><?php esc_html_e( 'Egresos', 'multisede-pos' ); ?></td>
+						<td>−<?php echo wp_kses_post( wc_price( $totales['egresos'] ) ); ?></td>
+					</tr>
+					<tr style="font-weight:700">
+						<td><?php esc_html_e( 'Efectivo esperado', 'multisede-pos' ); ?></td>
+						<td><?php echo wp_kses_post( wc_price( $esperado ) ); ?></td>
+					</tr>
+				</tbody>
+			</table>
+
+			<p><?php esc_html_e( 'Eso es lo que el sistema calcula que debería haber en el cajón. Ahora el cajero lo cuenta de verdad y escribe lo que encontró. Escribe un monto distinto a propósito para ver qué es el arqueo.', 'multisede-pos' ); ?></p>
+
+			<form method="post">
+				<?php wp_nonce_field( 'msp_wizard', 'msp_wizard_nonce' ); ?>
+				<input type="hidden" name="msp_wizard_action" value="practica_cerrar" />
+				<input type="hidden" name="sede" value="<?php echo esc_attr( $sede_id ); ?>" />
+				<p>
+					<label><?php esc_html_e( 'Efectivo contado', 'multisede-pos' ); ?><br>
+						<input type="number" step="0.01" min="0" name="monto_contado"
+							value="<?php echo esc_attr( max( 0, round( $esperado - 2, 2 ) ) ); ?>" required class="regular-text" />
+					</label>
+				</p>
+				<button type="submit" class="button button-primary"><?php esc_html_e( 'Cerrar caja de práctica', 'multisede-pos' ); ?></button>
+			</form>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Práctica terminada: se muestra el arqueo y se ofrece borrarla.
+	 *
+	 * @param object $sesion  Sesión cerrada.
+	 * @param int    $sede_id Sede.
+	 */
+	private function practica_cerrada( $sesion, $sede_id ) {
+		$dif     = (float) $sesion->diferencia;
+		$cuadra  = 0 === (int) round( $dif * 100 );
+		$color   = $cuadra ? '#1C8E80' : ( $dif < 0 ? '#b32d2e' : '#996800' );
+		?>
+		<div style="border:1px solid #dcdcde;border-left:4px solid <?php echo esc_attr( $color ); ?>;border-radius:6px;padding:16px 20px">
+			<h3 style="margin-top:0"><?php esc_html_e( '✓ Turno cerrado. Esto es el arqueo', 'multisede-pos' ); ?></h3>
+
+			<table class="widefat striped" style="max-width:420px;margin-bottom:14px">
+				<tbody>
+					<tr>
+						<td><?php esc_html_e( 'Efectivo esperado', 'multisede-pos' ); ?></td>
+						<td><?php echo wp_kses_post( wc_price( $sesion->monto_cierre_esperado ) ); ?></td>
+					</tr>
+					<tr>
+						<td><?php esc_html_e( 'Efectivo contado', 'multisede-pos' ); ?></td>
+						<td><?php echo wp_kses_post( wc_price( $sesion->monto_cierre_contado ) ); ?></td>
+					</tr>
+					<tr style="font-weight:700;color:<?php echo esc_attr( $color ); ?>">
+						<td><?php esc_html_e( 'Diferencia', 'multisede-pos' ); ?></td>
+						<td><?php echo wp_kses_post( wc_price( $dif ) ); ?></td>
+					</tr>
+				</tbody>
+			</table>
+
+			<?php if ( $cuadra ) : ?>
+				<p><?php esc_html_e( 'La caja cuadró: lo contado coincide con lo esperado.', 'multisede-pos' ); ?></p>
+			<?php elseif ( $dif < 0 ) : ?>
+				<p><?php esc_html_e( 'Faltó dinero en el cajón: se contó menos de lo esperado. Eso es un faltante.', 'multisede-pos' ); ?></p>
+			<?php else : ?>
+				<p><?php esc_html_e( 'Sobró dinero en el cajón: se contó más de lo esperado. Suele ser un vuelto mal dado o un movimiento sin registrar.', 'multisede-pos' ); ?></p>
+			<?php endif; ?>
+
+			<p><?php esc_html_e( 'Lo importante no es que la diferencia dé cero, sino que quede registrada. En la caja real, este cierre aparecería en el historial de arqueos de la sede, con el nombre del cajero.', 'multisede-pos' ); ?></p>
+
+			<form method="post" style="display:inline">
+				<?php wp_nonce_field( 'msp_wizard', 'msp_wizard_nonce' ); ?>
+				<input type="hidden" name="msp_wizard_action" value="practica_descartar" />
+				<input type="hidden" name="sede" value="<?php echo esc_attr( $sede_id ); ?>" />
+				<input type="hidden" name="sesion" value="<?php echo esc_attr( $sesion->id ); ?>" />
+				<button type="submit" class="button">
+					<?php esc_html_e( 'Descartar la práctica y volver a empezar', 'multisede-pos' ); ?>
+				</button>
+			</form>
+			<p class="description" style="margin-top:8px">
+				<?php esc_html_e( 'Esta caja de práctica no aparece en el reporte de arqueos, así que puedes dejarla o borrarla; da igual.', 'multisede-pos' ); ?>
+			</p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Botón de finalización del asistente.
+	 */
+	private function boton_finalizar() {
+		?>
+		<form method="post" action="" style="margin-top:24px">
+			<?php wp_nonce_field( 'msp_wizard', 'msp_wizard_nonce' ); ?>
+			<input type="hidden" name="msp_wizard_action" value="finalizar" />
+			<button type="submit" class="button button-primary button-hero"><?php esc_html_e( '✓ Finalizar configuración', 'multisede-pos' ); ?></button>
+		</form>
+		<p style="color:#787c82;margin-top:8px">
+			<?php esc_html_e( 'Te llevamos a la página de Ayuda, donde quedan explicados todos los flujos del día a día: abrir caja, vender en mostrador, entregar un pedido web y cerrar caja con arqueo.', 'multisede-pos' ); ?>
+		</p>
+		<?php
+	}
+
+	/**
+	 * Paso 4: recojo en tienda.
 	 */
 	private function paso_recojo() {
 		$lp_url = esc_url( admin_url( 'admin.php?page=wc-settings&tab=shipping' ) );
@@ -484,14 +832,10 @@ class MSP_Wizard {
 			);
 		?></p>
 
-		<form method="post" action="" style="margin-top:24px">
-			<?php wp_nonce_field( 'msp_wizard', 'msp_wizard_nonce' ); ?>
-			<input type="hidden" name="msp_wizard_action" value="finalizar" />
-			<button type="submit" class="button button-primary button-hero"><?php esc_html_e( '✓ Finalizar y ver cómo se usa', 'multisede-pos' ); ?></button>
-		</form>
-		<p style="color:#787c82;margin-top:8px">
-			<?php esc_html_e( 'Al finalizar te llevamos a la página de Ayuda, donde están explicados los flujos del día a día: abrir caja, vender en mostrador, entregar un pedido web y cerrar caja con arqueo.', 'multisede-pos' ); ?>
-		</p>
+		<hr style="margin:24px 0">
+		<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE . '&step=5' ) ); ?>" class="button button-primary">
+			<?php esc_html_e( 'Continuar: practicar un turno de caja →', 'multisede-pos' ); ?>
+		</a>
 		<?php
 	}
 }

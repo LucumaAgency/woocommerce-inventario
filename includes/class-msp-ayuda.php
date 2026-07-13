@@ -193,6 +193,17 @@ class MSP_Ayuda {
 					</ol>
 					<p><?php esc_html_e( 'La diferencia entre lo contado y lo esperado queda guardada en el arqueo. No pasa nada por que exista: lo importante es que quede registrada, no que dé cero.', 'multisede-pos' ); ?></p>
 					<p><?php esc_html_e( 'Las ventas con tarjeta o Yape/Plin no entran en el efectivo esperado, porque ese dinero no está en el cajón.', 'multisede-pos' ); ?></p>
+
+					<?php if ( $es_admin ) : ?>
+						<p>
+							<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . MSP_Wizard::PAGE . '&step=5' ) ); ?>" class="button">
+								<?php esc_html_e( 'Practicar un turno de caja completo', 'multisede-pos' ); ?>
+							</a>
+							<span class="description" style="margin-left:8px">
+								<?php esc_html_e( 'Abre, mueve y cierra una caja de práctica que no cuenta en los reportes.', 'multisede-pos' ); ?>
+							</span>
+						</p>
+					<?php endif; ?>
 				</div>
 			<?php endif; ?>
 

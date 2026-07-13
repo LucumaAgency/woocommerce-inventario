@@ -4,7 +4,7 @@ Tags: woocommerce, inventario, multi-almacen, pos, caja
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 1.3.0
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,11 @@ Requiere WooCommerce activo.
 3. Configura tus sedes en el nuevo menú "Sedes".
 
 == Changelog ==
+
+= 1.4.0 =
+* Nuevo paso 5 del asistente: "Practicar caja". Guía un turno completo de verdad (abrir la caja, registrar un movimiento y cerrarla con arqueo) explicando cada paso, para entender qué es el efectivo esperado y qué significa la diferencia.
+* La caja de práctica está aislada: queda marcada como tal, no aparece en el historial de arqueos, no recibe el efectivo de las ventas del POS, no bloquea la apertura de la caja real del turno y se puede borrar de un clic.
+* El esquema de la base de datos ahora se actualiza solo al actualizar el plugin (antes solo se aplicaba al activarlo, así que una columna nueva no llegaba a las instalaciones existentes).
 
 = 1.3.0 =
 * Asignación de sedes a los usuarios: casillas en el perfil de cada usuario, columna "Sedes" en el listado de usuarios y un paso nuevo en el asistente para asignar a todo el personal de golpe. Sin esto, el POS y la Caja solo funcionaban para administradores.

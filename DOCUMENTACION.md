@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.1.0
+- **Versión actual:** 1.2.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -195,12 +195,14 @@ Registra el CPT `msp_sede`, el metabox con los datos de la tienda y las columnas
 Corazón del inventario. API estática principal:
 - `get(producto, sede)` / `set(producto, sede, stock)` — leer/fijar stock.
 - `ajustar(producto, sede, delta)` — sumar/restar de forma atómica.
+- `descontar_si_hay(producto, sede, cantidad)` — descuenta solo si hay disponible; devuelve `false` si no. Condición y descuento van en la misma sentencia SQL, así que evita la sobreventa entre cajeros simultáneos.
 - `reservar` / `liberar_reserva` / `confirmar_reserva` — gestión de reservas.
 - `disponible_sede(producto, sede)` — físico − reservado.
+- `disponible_producto(WC_Product, sede)` — igual, pero en un producto variable suma el disponible de sus variaciones.
 - `total` / `total_reservado` — sumas globales.
 - `sincronizar_woo(producto)` — fija el stock global de Woo = `Σ físico − Σ reservado`.
 
-Añade los campos de stock por sede en la pestaña **Inventario** del producto y una columna "Stock por sede" en el listado. En pedidos con sede **desactiva** la reducción automática de Woo (filtro `woocommerce_can_reduce_order_stock`) para gestionarla el plugin.
+Añade los campos de stock por sede en la pestaña **Inventario** del producto (en los variables, dentro de **cada variación**, que es donde vive su stock) y una columna "Stock por sede" en el listado, que en los variables muestra la suma de sus variaciones. En pedidos con sede **desactiva** la reducción automática de Woo (filtro `woocommerce_can_reduce_order_stock`) para gestionarla el plugin.
 
 ### MSP_Recojo
 - Inyecta el campo **sede de recojo** en el checkout clásico (si hay tienda elegida, queda fija).
@@ -217,10 +219,10 @@ Añade los campos de stock por sede en la pestaña **Inventario** del producto y
 
 ### MSP_POS
 - Página **POS** (capacidad `msp_usar_pos`).
-- Búsqueda de productos por AJAX (nombre o SKU) con stock de la sede.
+- Búsqueda de productos por AJAX (nombre o SKU) con el **disponible** de la sede. Los productos variables se despliegan en sus variaciones.
 - Ticket con cantidades, métodos de pago (efectivo, tarjeta, Yape/Plin, otro) y cálculo de vuelto.
-- Al cobrar crea un pedido de WooCommerce **completado**, descuenta stock de la sede y dispara el hook `msp_pos_venta_creada`.
-- Repone stock si la venta se cancela/reembolsa.
+- Al cobrar descuenta el stock de forma **atómica y condicional** (`descontar_si_hay`), crea un pedido de WooCommerce **completado** y dispara `msp_pos_venta_creada`. Si el stock se agotó entre la búsqueda y el cobro, el cobro falla y se devuelve lo ya descontado.
+- Repone stock y dispara `msp_pos_venta_anulada` si la venta se cancela/reembolsa.
 
 ### MSP_Caja
 - Página **Caja** (capacidad `msp_gestionar_caja`).
@@ -277,6 +279,7 @@ Menú **Caja** → ve el efectivo esperado → cuenta el cajón → escribe el *
 
 ### Hooks (actions)
 - `msp_pos_venta_creada( $order, $metodo, $sede_id )` — se dispara al crear una venta en el POS. Lo usa la caja chica para registrar el efectivo; se puede usar para integraciones (facturación, etc.).
+- `msp_pos_venta_anulada( $order, $sede_id )` — se dispara al cancelar o reembolsar una venta del POS, después de devolver el stock a la sede. Lo usa la caja chica para revertir el efectivo.
 
 ### Filtros de WooCommerce intervenidos
 - `woocommerce_can_reduce_order_stock` — desactiva la reducción automática en pedidos con sede.
@@ -296,12 +299,15 @@ Menú **Caja** → ve el efectivo esperado → cuenta el cajón → escribe el *
 | **0.4.0** | Fase 4 — POS de mostrador |
 | **1.0.0** | Fase 5 — Caja chica (plugin funcionalmente completo) |
 | **1.1.0** | Compra por tienda (la web opera por sede) |
+| **1.2.0** | Stock disponible y descuento atómico en el POS, reversa de caja al anular una venta, soporte de productos variables |
 
 ---
 
 ## 12. Limitaciones conocidas y mejoras futuras
 
+- **Asignación usuario↔sede:** la meta `_msp_sedes` se lee (POS y Caja filtran por ella) pero **todavía no hay pantalla para escribirla**. Hasta que exista, solo los usuarios con `manage_options` ven sedes en POS y Caja. Es el siguiente pendiente.
+- **Capacidades sin uso:** `msp_gestionar_sedes`, `msp_gestionar_stock`, `msp_ver_stock` y `msp_ver_reportes` se crean pero no se comprueban en ninguna parte. Además el rol Gerente de sede no tiene `edit_products`, así que hoy no puede ajustar el stock desde la ficha de producto.
 - **Checkout de bloques:** la integración actual usa el **checkout/tienda clásicos** (incluye constructores como Bricks, que usan el checkout clásico). El checkout de **bloques** (React/Store API) requiere integración adicional pendiente.
-- **Variaciones en el POS:** el POS maneja productos **simples**; las variaciones quedan para una iteración futura.
+- **Anulación sin caja abierta:** si se anula una venta POS en efectivo cuyo turno ya se cerró y el cajero no tiene otra caja abierta, el egreso no se registra (no se toca un arqueo cerrado): queda una nota en el pedido para ajustarlo a mano.
 - **Banner automático en temas con layout propio:** el banner se engancha a `woocommerce_before_main_content`; en temas/constructores que no lo disparen, colocar el selector con el shortcode manualmente.
 - **Otras ideas:** reportes consolidados entre sedes, impresión de ticket, lector de código de barras por hardware, traslados de stock entre sedes.

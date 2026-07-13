@@ -4,7 +4,7 @@ Tags: woocommerce, inventario, multi-almacen, pos, caja
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,13 @@ Requiere WooCommerce activo.
 3. Configura tus sedes en el nuevo menú "Sedes".
 
 == Changelog ==
+
+= 1.2.0 =
+* El POS vende contra el stock disponible (físico menos reservado): ya no puede vender unidades apartadas para un pedido web pendiente de recojo.
+* El descuento de stock al cobrar es atómico: dos cajeros vendiendo la última unidad a la vez ya no pueden sobrevender.
+* Anular (cancelar o reembolsar) una venta POS en efectivo devuelve el dinero a la caja como egreso, de modo que el arqueo ya no queda descuadrado.
+* Productos variables: stock por sede en cada variación, venta de variaciones en el POS y disponibilidad correcta en la web.
+* El buscador del POS solo consulta el stock de las sedes asignadas al usuario.
 
 = 1.1.0 =
 * Compra por tienda: el cliente elige una sede y la web muestra y respeta solo el stock de esa sede. Incluye selector de tienda (shortcode [msp_selector_sede] y banner en las páginas de tienda), disponibilidad y estado de stock por sede, validación al agregar al carrito y en el checkout, y sede de recojo fijada a la tienda elegida.

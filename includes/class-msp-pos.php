@@ -224,11 +224,14 @@ class MSP_POS {
 		$term    = isset( $_GET['term'] ) ? sanitize_text_field( wp_unslash( $_GET['term'] ) ) : '';
 		$sede_id = isset( $_GET['sede'] ) ? absint( wp_unslash( $_GET['sede'] ) ) : 0;
 
+		// Solo se puede consultar el stock de una sede propia.
+		if ( ! $sede_id || ! $this->puede_usar_sede( $sede_id ) ) {
+			wp_send_json_error( array( 'msg' => __( 'Sede no válida.', 'multisede-pos' ) ), 400 );
+		}
+
 		if ( strlen( $term ) < 2 ) {
 			wp_send_json_success( array() );
 		}
-
-		$ids = array();
 
 		// Búsqueda por nombre.
 		$query = new WP_Query(
@@ -242,7 +245,7 @@ class MSP_POS {
 		);
 		$ids = $query->posts;
 
-		// Búsqueda por SKU exacto.
+		// Búsqueda por SKU exacto (puede ser el SKU de una variación).
 		$por_sku = wc_get_product_id_by_sku( $term );
 		if ( $por_sku && ! in_array( $por_sku, $ids, true ) ) {
 			array_unshift( $ids, $por_sku );
@@ -251,24 +254,54 @@ class MSP_POS {
 		$salida = array();
 		foreach ( $ids as $id ) {
 			$product = wc_get_product( $id );
-			if ( ! $product || ! $product->is_purchasable() ) {
-				continue;
-			}
-			// Por simplicidad, el POS maneja productos simples.
-			if ( $product->is_type( 'variable' ) ) {
+			if ( ! $product ) {
 				continue;
 			}
 
-			$salida[] = array(
-				'id'     => $id,
-				'nombre' => $product->get_name(),
-				'sku'    => $product->get_sku(),
-				'precio' => (float) wc_get_price_to_display( $product ),
-				'stock'  => $sede_id ? MSP_Stock::get( $id, $sede_id ) : null,
-			);
+			// Un producto variable se despliega en sus variaciones vendibles.
+			if ( $product->is_type( 'variable' ) ) {
+				foreach ( $product->get_children() as $variacion_id ) {
+					$variacion = wc_get_product( $variacion_id );
+					if ( $variacion && $variacion->is_purchasable() ) {
+						$salida[] = $this->fila_producto( $variacion, $sede_id );
+					}
+				}
+				continue;
+			}
+
+			if ( $product->is_purchasable() ) {
+				$salida[] = $this->fila_producto( $product, $sede_id );
+			}
 		}
 
 		wp_send_json_success( $salida );
+	}
+
+	/**
+	 * Formatea un producto (o variación) para la lista de resultados.
+	 *
+	 * @param WC_Product $product Producto o variación.
+	 * @param int        $sede_id Sede.
+	 * @return array
+	 */
+	private function fila_producto( $product, $sede_id ) {
+		$nombre = $product->get_name();
+
+		// En una variación, añade los atributos para distinguirla.
+		if ( $product->is_type( 'variation' ) ) {
+			$atributos = wc_get_formatted_variation( $product, true, false );
+			if ( $atributos ) {
+				$nombre .= ' (' . $atributos . ')';
+			}
+		}
+
+		return array(
+			'id'     => $product->get_id(),
+			'nombre' => $nombre,
+			'sku'    => $product->get_sku(),
+			'precio' => (float) wc_get_price_to_display( $product ),
+			'stock'  => MSP_Stock::disponible_sede( $product->get_id(), $sede_id ),
+		);
 	}
 
 	/**
@@ -292,7 +325,7 @@ class MSP_POS {
 			wp_send_json_error( array( 'msg' => __( 'El ticket está vacío.', 'multisede-pos' ) ), 400 );
 		}
 
-		// Validar stock disponible en la sede antes de crear el pedido.
+		// Validar stock disponible (físico − reservado) en la sede.
 		$normalizados = array();
 		foreach ( $items as $item ) {
 			$pid = isset( $item['id'] ) ? absint( $item['id'] ) : 0;
@@ -300,20 +333,9 @@ class MSP_POS {
 			if ( ! $pid || $qty < 1 ) {
 				continue;
 			}
-			$disponible = MSP_Stock::get( $pid, $sede_id );
+			$disponible = MSP_Stock::disponible_sede( $pid, $sede_id );
 			if ( $qty > $disponible ) {
-				$product = wc_get_product( $pid );
-				wp_send_json_error(
-					array(
-						/* translators: 1: producto, 2: stock disponible. */
-						'msg' => sprintf(
-							__( 'Stock insuficiente de "%1$s" en esta sede (disponible: %2$d).', 'multisede-pos' ),
-							$product ? $product->get_name() : $pid,
-							$disponible
-						),
-					),
-					409
-				);
+				wp_send_json_error( array( 'msg' => $this->msg_sin_stock( $pid, $disponible ) ), 409 );
 			}
 			$normalizados[ $pid ] = $qty;
 		}
@@ -322,9 +344,25 @@ class MSP_POS {
 			wp_send_json_error( array( 'msg' => __( 'No hay productos válidos en el ticket.', 'multisede-pos' ) ), 400 );
 		}
 
+		// Descontar el stock antes de crear el pedido. El descuento es
+		// condicional y atómico: si otro cajero se adelantó, falla aquí y se
+		// devuelve lo ya descontado en lugar de sobrevender.
+		$descontados = array();
+		foreach ( $normalizados as $pid => $qty ) {
+			if ( ! MSP_Stock::descontar_si_hay( $pid, $sede_id, $qty ) ) {
+				$this->revertir_descuentos( $descontados, $sede_id );
+				wp_send_json_error(
+					array( 'msg' => $this->msg_sin_stock( $pid, MSP_Stock::disponible_sede( $pid, $sede_id ) ) ),
+					409
+				);
+			}
+			$descontados[ $pid ] = $qty;
+		}
+
 		// Crear el pedido.
 		$order = wc_create_order();
 		if ( is_wp_error( $order ) ) {
+			$this->revertir_descuentos( $descontados, $sede_id );
 			wp_send_json_error( array( 'msg' => __( 'No se pudo crear el pedido.', 'multisede-pos' ) ), 500 );
 		}
 
@@ -355,9 +393,8 @@ class MSP_POS {
 		$order->calculate_totals();
 		$order->update_status( 'completed', __( 'Venta en mostrador (POS).', 'multisede-pos' ) );
 
-		// Descontar stock físico de la sede.
+		// El stock ya se descontó arriba; aquí solo refrescamos el espejo de Woo.
 		foreach ( $normalizados as $pid => $qty ) {
-			MSP_Stock::ajustar( $pid, $sede_id, -$qty );
 			MSP_Stock::sincronizar_woo( $pid );
 		}
 
@@ -383,6 +420,35 @@ class MSP_POS {
 				),
 			)
 		);
+	}
+
+	/**
+	 * Mensaje de stock insuficiente para un producto.
+	 *
+	 * @param int $producto_id ID de producto/variación.
+	 * @param int $disponible  Unidades disponibles.
+	 * @return string
+	 */
+	private function msg_sin_stock( $producto_id, $disponible ) {
+		$product = wc_get_product( $producto_id );
+		return sprintf(
+			/* translators: 1: producto, 2: stock disponible. */
+			__( 'Stock insuficiente de "%1$s" en esta sede (disponible: %2$d).', 'multisede-pos' ),
+			$product ? $product->get_name() : $producto_id,
+			(int) $disponible
+		);
+	}
+
+	/**
+	 * Devuelve a la sede el stock ya descontado de un cobro que no prosperó.
+	 *
+	 * @param array<int,int> $descontados Producto => cantidad.
+	 * @param int            $sede_id     Sede.
+	 */
+	private function revertir_descuentos( $descontados, $sede_id ) {
+		foreach ( $descontados as $pid => $qty ) {
+			MSP_Stock::ajustar( $pid, $sede_id, $qty );
+		}
 	}
 
 	/**
@@ -415,5 +481,15 @@ class MSP_POS {
 		$order->update_meta_data( '_msp_stock_aplicado', '0' );
 		$order->add_order_note( __( 'Venta POS anulada: stock devuelto a la sede.', 'multisede-pos' ) );
 		$order->save();
+
+		/**
+		 * Venta de mostrador anulada (cancelada o reembolsada).
+		 *
+		 * La caja chica lo usa para revertir el efectivo de esa venta.
+		 *
+		 * @param WC_Order $order   Pedido anulado.
+		 * @param int      $sede_id Sede.
+		 */
+		do_action( 'msp_pos_venta_anulada', $order, $sede_id );
 	}
 }

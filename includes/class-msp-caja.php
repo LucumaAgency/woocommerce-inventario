@@ -24,6 +24,8 @@ class MSP_Caja {
 		add_action( 'admin_init', array( $this, 'procesar' ) );
 		// Registrar las ventas POS en efectivo como movimiento de caja.
 		add_action( 'msp_pos_venta_creada', array( $this, 'registrar_venta_pos' ), 10, 3 );
+		// Devolver el efectivo si esa venta se anula.
+		add_action( 'msp_pos_venta_anulada', array( $this, 'revertir_venta_pos' ), 10, 2 );
 	}
 
 	/* ---------------------------------------------------------------------
@@ -234,6 +236,110 @@ class MSP_Caja {
 			$order->get_total(),
 			$order->get_id()
 		);
+	}
+
+	/**
+	 * Busca un movimiento de un pedido por tipo.
+	 *
+	 * @param int    $pedido_id Pedido.
+	 * @param string $tipo      ingreso | egreso | venta.
+	 * @return object|null
+	 */
+	public static function movimiento_de_pedido( $pedido_id, $tipo ) {
+		global $wpdb;
+		return $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT * FROM ' . self::tabla_movimientos() . '
+				 WHERE pedido_id = %d AND tipo = %s ORDER BY id ASC LIMIT 1',
+				$pedido_id,
+				$tipo
+			)
+		);
+	}
+
+	/**
+	 * Devuelve una sesión por su ID.
+	 *
+	 * @param int $sesion_id Sesión.
+	 * @return object|null
+	 */
+	public static function sesion( $sesion_id ) {
+		global $wpdb;
+		return $wpdb->get_row(
+			$wpdb->prepare( 'SELECT * FROM ' . self::tabla_sesiones() . ' WHERE id = %d', $sesion_id )
+		);
+	}
+
+	/**
+	 * Revierte el efectivo de una venta POS anulada (cancelada o reembolsada).
+	 *
+	 * El egreso entra en la caja donde se cobró si sigue abierta. Si ese turno
+	 * ya se cerró, entra en la caja abierta del mismo cajero en esa sede; si no
+	 * hay ninguna, se avisa en el pedido para que se ajuste a mano (no tocamos
+	 * un arqueo ya cerrado).
+	 *
+	 * @param WC_Order $order   Pedido anulado.
+	 * @param int      $sede_id Sede.
+	 */
+	public function revertir_venta_pos( $order, $sede_id ) {
+		if ( 'efectivo' !== $order->get_meta( '_msp_pos_metodo' ) ) {
+			return;
+		}
+
+		$pedido_id = $order->get_id();
+
+		// El efectivo nunca entró a una caja: nada que devolver.
+		$venta = self::movimiento_de_pedido( $pedido_id, 'venta' );
+		if ( ! $venta ) {
+			return;
+		}
+
+		// Ya se revirtió antes.
+		if ( self::movimiento_de_pedido( $pedido_id, 'egreso' ) ) {
+			return;
+		}
+
+		$concepto = sprintf(
+			/* translators: %s: número de pedido. */
+			__( 'Anulación de venta POS #%s', 'multisede-pos' ),
+			$order->get_order_number()
+		);
+
+		$sesion_venta = self::sesion( $venta->sesion_id );
+		$destino      = ( $sesion_venta && 'abierta' === $sesion_venta->estado ) ? $sesion_venta : null;
+
+		if ( ! $destino ) {
+			// El turno del cobro ya está cerrado: lo llevamos al turno abierto.
+			$destino  = self::sesion_abierta( $sede_id, (int) $order->get_meta( '_msp_cajero_id' ) );
+			$concepto = sprintf(
+				/* translators: %s: número de pedido. */
+				__( 'Anulación de venta POS #%s (cobrada en un turno anterior)', 'multisede-pos' ),
+				$order->get_order_number()
+			);
+		}
+
+		if ( ! $destino ) {
+			$order->add_order_note(
+				sprintf(
+					/* translators: %s: importe. */
+					__( 'Venta POS anulada, pero no hay caja abierta donde devolver el efectivo (%s). Regístralo como egreso al abrir la próxima caja.', 'multisede-pos' ),
+					wp_strip_all_tags( wc_price( $venta->monto ) )
+				)
+			);
+			$order->save();
+			return;
+		}
+
+		self::agregar_movimiento( $destino->id, 'egreso', $concepto, $venta->monto, $pedido_id );
+
+		$order->add_order_note(
+			sprintf(
+				/* translators: %s: importe. */
+				__( 'Venta POS anulada: %s devueltos como egreso de caja.', 'multisede-pos' ),
+				wp_strip_all_tags( wc_price( $venta->monto ) )
+			)
+		);
+		$order->save();
 	}
 
 	/* ---------------------------------------------------------------------

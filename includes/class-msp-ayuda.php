@@ -119,7 +119,7 @@ class MSP_Ayuda {
 							);
 						?></li>
 					</ol>
-					<p><?php esc_html_e( 'A partir de ahí, todo el efectivo que entre y salga en tu turno queda registrado. Sin caja abierta el POS igual vende, pero el efectivo de esas ventas no se registra en ninguna caja y el arqueo del día no cuadrará.', 'multisede-pos' ); ?></p>
+					<p><?php esc_html_e( 'A partir de ahí, todo el efectivo que entre y salga en tu turno queda registrado. Sin caja abierta el POS igual vende, pero el efectivo de esas ventas no se registra en ninguna caja y al final del día la caja no te va a cuadrar.', 'multisede-pos' ); ?></p>
 				</div>
 			<?php endif; ?>
 
@@ -184,15 +184,22 @@ class MSP_Ayuda {
 
 			<?php if ( current_user_can( 'msp_gestionar_caja' ) ) : ?>
 				<div class="msp-card">
-					<h2><?php esc_html_e( '5. Cerrar la caja (al terminar el turno)', 'multisede-pos' ); ?></h2>
+					<h2><?php esc_html_e( '5. Cerrar y cuadrar la caja (al terminar el turno)', 'multisede-pos' ); ?></h2>
 					<ol>
 						<li><?php esc_html_e( 'Registra antes cualquier movimiento suelto: un gasto pagado del cajón es un "egreso", plata que metiste al cajón es un "ingreso".', 'multisede-pos' ); ?></li>
 						<li><?php esc_html_e( 'Mira el "Efectivo esperado": es lo que el sistema calcula que debería haber (apertura + ventas en efectivo + ingresos − egresos).', 'multisede-pos' ); ?></li>
 						<li><?php esc_html_e( 'Cuenta el cajón de verdad y escribe ese monto en "Efectivo contado".', 'multisede-pos' ); ?></li>
 						<li><?php esc_html_e( 'Pulsa "Cerrar caja".', 'multisede-pos' ); ?></li>
 					</ol>
-					<p><?php esc_html_e( 'La diferencia entre lo contado y lo esperado queda guardada en el arqueo. No pasa nada por que exista: lo importante es que quede registrada, no que dé cero.', 'multisede-pos' ); ?></p>
+					<p><?php esc_html_e( 'El sistema compara lo que contaste con lo esperado y te dice si la caja cuadró, si faltó plata o si sobró. No pasa nada por que no cuadre: lo importante es que quede registrado, no que dé cero.', 'multisede-pos' ); ?></p>
 					<p><?php esc_html_e( 'Las ventas con tarjeta o Yape/Plin no entran en el efectivo esperado, porque ese dinero no está en el cajón.', 'multisede-pos' ); ?></p>
+					<p><?php
+						printf(
+							/* translators: %s: nombre de la tabla en la pantalla de Caja. */
+							esc_html__( 'Cada cierre queda guardado en la tabla %s, al final de la pantalla de Caja, con el nombre del cajero y el resultado. Solo la ve el gerente o el administrador.', 'multisede-pos' ),
+							'<strong>' . esc_html__( 'Cierres de caja', 'multisede-pos' ) . '</strong>'
+						);
+					?></p>
 
 					<?php if ( $es_admin ) : ?>
 						<p>

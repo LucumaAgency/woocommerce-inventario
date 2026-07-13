@@ -131,6 +131,50 @@ class MSP_Caja {
 	}
 
 	/**
+	 * Traduce la diferencia del cierre a lenguaje de tienda.
+	 *
+	 * En vez de un número con signo ("−S/ 2.00"), que hay que interpretar, se
+	 * dice si la caja cuadró, si faltó plata o si sobró.
+	 *
+	 * @param float $diferencia Contado − esperado.
+	 * @return array{texto:string,color:string,cuadra:bool}
+	 */
+	public static function resultado_cuadre( $diferencia ) {
+		$diferencia = (float) $diferencia;
+
+		// Se compara en céntimos para no depender de la precisión de los float.
+		if ( 0 === (int) round( $diferencia * 100 ) ) {
+			return array(
+				'texto'  => esc_html__( 'Cuadró', 'multisede-pos' ),
+				'color'  => '#1C8E80',
+				'cuadra' => true,
+			);
+		}
+
+		if ( $diferencia < 0 ) {
+			return array(
+				'texto'  => sprintf(
+					/* translators: %s: importe que falta. */
+					esc_html__( 'Faltaron %s', 'multisede-pos' ),
+					wc_price( abs( $diferencia ) )
+				),
+				'color'  => '#b32d2e',
+				'cuadra' => false,
+			);
+		}
+
+		return array(
+			'texto'  => sprintf(
+				/* translators: %s: importe que sobra. */
+				esc_html__( 'Sobraron %s', 'multisede-pos' ),
+				wc_price( $diferencia )
+			),
+			'color'  => '#996800',
+			'cuadra' => false,
+		);
+	}
+
+	/**
 	 * Última sesión de práctica de un usuario en una sede, abierta o cerrada.
 	 *
 	 * @param int $sede_id   Sede.
@@ -608,7 +652,7 @@ class MSP_Caja {
 			'abierta'    => array( 'success', __( 'Caja abierta.', 'multisede-pos' ) ),
 			'ya_abierta' => array( 'warning', __( 'Ya tienes una caja abierta en esta sede.', 'multisede-pos' ) ),
 			'movimiento' => array( 'success', __( 'Movimiento registrado.', 'multisede-pos' ) ),
-			'cerrada'    => array( 'success', __( 'Caja cerrada. Revisa el arqueo abajo.', 'multisede-pos' ) ),
+			'cerrada'    => array( 'success', __( 'Caja cerrada. Revisa el cuadre abajo.', 'multisede-pos' ) ),
 		);
 		if ( isset( $mensajes[ $aviso ] ) ) {
 			printf(
@@ -661,8 +705,8 @@ class MSP_Caja {
 			'</td><td>' . wp_kses_post( wc_price( $esperado ) ) . '</td></tr>';
 		echo '</tbody></table>';
 
-		// Cerrar caja (arqueo).
-		echo '<h3 style="margin-top:20px">' . esc_html__( 'Cerrar caja (arqueo)', 'multisede-pos' ) . '</h3>';
+		// Cerrar caja y cuadrarla.
+		echo '<h3 style="margin-top:20px">' . esc_html__( 'Cerrar caja (cuadre)', 'multisede-pos' ) . '</h3>';
 		echo '<form method="post">';
 		wp_nonce_field( 'msp_caja', 'msp_caja_nonce' );
 		echo '<input type="hidden" name="msp_caja_action" value="cerrar_caja" />';
@@ -729,7 +773,7 @@ class MSP_Caja {
 	private function tabla_reportes( $sede_id ) {
 		global $wpdb;
 
-		// El historial de arqueos es cosa de gerencia, no del cajero.
+		// El historial de cierres es cosa de gerencia, no del cajero.
 		if ( ! current_user_can( 'msp_ver_reportes' ) ) {
 			return;
 		}
@@ -744,7 +788,7 @@ class MSP_Caja {
 			)
 		);
 
-		echo '<h2 style="margin-top:30px">' . esc_html__( 'Cierres recientes', 'multisede-pos' ) . '</h2>';
+		echo '<h2 style="margin-top:30px">' . esc_html__( 'Cierres de caja', 'multisede-pos' ) . '</h2>';
 		if ( ! $sesiones ) {
 			echo '<p>' . esc_html__( 'Aún no hay cierres de caja en esta sede.', 'multisede-pos' ) . '</p>';
 			return;
@@ -755,19 +799,19 @@ class MSP_Caja {
 		echo '<th>' . esc_html__( 'Cierre', 'multisede-pos' ) . '</th>';
 		echo '<th>' . esc_html__( 'Esperado', 'multisede-pos' ) . '</th>';
 		echo '<th>' . esc_html__( 'Contado', 'multisede-pos' ) . '</th>';
-		echo '<th>' . esc_html__( 'Diferencia', 'multisede-pos' ) . '</th>';
+		echo '<th>' . esc_html__( 'Resultado', 'multisede-pos' ) . '</th>';
 		echo '</tr></thead><tbody>';
 
 		foreach ( $sesiones as $s ) {
 			$user      = get_userdata( $s->cajero_id );
-			$dif       = (float) $s->diferencia;
-			$color     = 0 === (int) round( $dif * 100 ) ? '#1C8E80' : ( $dif < 0 ? '#b32d2e' : '#996800' );
+			$resultado = self::resultado_cuadre( (float) $s->diferencia );
 			echo '<tr>';
 			echo '<td>' . esc_html( $user ? $user->display_name : '#' . $s->cajero_id ) . '</td>';
 			echo '<td>' . esc_html( $s->cerrada_at ) . '</td>';
 			echo '<td>' . wp_kses_post( wc_price( $s->monto_cierre_esperado ) ) . '</td>';
 			echo '<td>' . wp_kses_post( wc_price( $s->monto_cierre_contado ) ) . '</td>';
-			echo '<td style="color:' . esc_attr( $color ) . ';font-weight:600">' . wp_kses_post( wc_price( $dif ) ) . '</td>';
+			echo '<td style="color:' . esc_attr( $resultado['color'] ) . ';font-weight:600">' .
+				wp_kses_post( $resultado['texto'] ) . '</td>';
 			echo '</tr>';
 		}
 		echo '</tbody></table>';

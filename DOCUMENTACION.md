@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.3.0
+- **Versión actual:** 1.5.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -345,6 +345,21 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.2.0** | Stock disponible y descuento atómico en el POS, reversa de caja al anular una venta, soporte de productos variables |
 | **1.3.0** | Asignación usuario↔sede, roles funcionales, pantalla de Inventario, asistente ampliado y página de Ayuda |
 | **1.4.0** | Paso de práctica de caja en el asistente (turno real, aislado y borrable) y migración automática del esquema al actualizar |
+| **1.5.0** | Lenguaje de tienda: "arqueo" → "cuadre", y el resultado del cierre se dice en claro (cuadró / faltaron / sobraron) |
+
+---
+
+## Nota de vocabulario
+
+En el **código** y en esta documentación se usa el término contable: la columna
+de la base de datos se llama `diferencia` y los comentarios hablan de arqueo.
+
+En la **interfaz** no. Ahí se habla como en la tienda: "arqueo" es **cuadre**, y
+la diferencia no se muestra como un número con signo, sino traducida por
+`MSP_Caja::resultado_cuadre( $diferencia )`, que devuelve **"Cuadró"**,
+**"Faltaron X"** o **"Sobraron X"** con su color. Si añades una pantalla que
+muestre el cierre de una caja, usa ese helper en vez de imprimir la diferencia a
+pelo, para no volver a meter jerga en la interfaz.
 
 ---
 

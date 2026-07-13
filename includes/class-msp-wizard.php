@@ -566,7 +566,7 @@ class MSP_Wizard {
 		$sedes = $this->sedes_con_caja();
 
 		echo '<h2>' . esc_html__( 'Practica un turno de caja', 'multisede-pos' ) . '</h2>';
-		echo '<p>' . esc_html__( 'Vamos a abrir una caja, registrar un gasto y cerrarla con arqueo, igual que hará el cajero cada día. Es una caja de práctica de verdad, pero marcada como tal: no entra en el reporte de arqueos, no recibe el efectivo de las ventas del POS y la puedes borrar al terminar.', 'multisede-pos' ) . '</p>';
+		echo '<p>' . esc_html__( 'Vamos a abrir una caja, registrar un gasto y cerrarla cuadrándola, igual que hará el cajero cada día. Es una caja de práctica de verdad, pero marcada como tal: no entra en los cierres de caja, no recibe el efectivo de las ventas del POS y la puedes borrar al terminar.', 'multisede-pos' ) . '</p>';
 
 		if ( empty( $sedes ) ) {
 			echo '<div class="notice notice-warning inline"><p>' .
@@ -678,7 +678,7 @@ class MSP_Wizard {
 		</div>
 
 		<div style="border:1px solid #dcdcde;border-left:4px solid #1C8E80;border-radius:6px;padding:16px 20px">
-			<h3 style="margin-top:0"><?php esc_html_e( 'Paso 3 de 3 — Cerrar con arqueo', 'multisede-pos' ); ?></h3>
+			<h3 style="margin-top:0"><?php esc_html_e( 'Paso 3 de 3 — Cerrar y cuadrar la caja', 'multisede-pos' ); ?></h3>
 
 			<table class="widefat striped" style="max-width:420px;margin-bottom:14px">
 				<tbody>
@@ -705,7 +705,7 @@ class MSP_Wizard {
 				</tbody>
 			</table>
 
-			<p><?php esc_html_e( 'Eso es lo que el sistema calcula que debería haber en el cajón. Ahora el cajero lo cuenta de verdad y escribe lo que encontró. Escribe un monto distinto a propósito para ver qué es el arqueo.', 'multisede-pos' ); ?></p>
+			<p><?php esc_html_e( 'Eso es lo que el sistema calcula que debería haber en el cajón. Ahora el cajero lo cuenta de verdad y escribe lo que encontró. Escribe un monto distinto a propósito, para ver qué pasa cuando la caja no cuadra.', 'multisede-pos' ); ?></p>
 
 			<form method="post">
 				<?php wp_nonce_field( 'msp_wizard', 'msp_wizard_nonce' ); ?>
@@ -730,12 +730,12 @@ class MSP_Wizard {
 	 * @param int    $sede_id Sede.
 	 */
 	private function practica_cerrada( $sesion, $sede_id ) {
-		$dif     = (float) $sesion->diferencia;
-		$cuadra  = 0 === (int) round( $dif * 100 );
-		$color   = $cuadra ? '#1C8E80' : ( $dif < 0 ? '#b32d2e' : '#996800' );
+		$dif       = (float) $sesion->diferencia;
+		$resultado = MSP_Caja::resultado_cuadre( $dif );
+		$color     = $resultado['color'];
 		?>
 		<div style="border:1px solid #dcdcde;border-left:4px solid <?php echo esc_attr( $color ); ?>;border-radius:6px;padding:16px 20px">
-			<h3 style="margin-top:0"><?php esc_html_e( '✓ Turno cerrado. Esto es el arqueo', 'multisede-pos' ); ?></h3>
+			<h3 style="margin-top:0"><?php esc_html_e( '✓ Turno cerrado. Así queda el cuadre', 'multisede-pos' ); ?></h3>
 
 			<table class="widefat striped" style="max-width:420px;margin-bottom:14px">
 				<tbody>
@@ -748,21 +748,27 @@ class MSP_Wizard {
 						<td><?php echo wp_kses_post( wc_price( $sesion->monto_cierre_contado ) ); ?></td>
 					</tr>
 					<tr style="font-weight:700;color:<?php echo esc_attr( $color ); ?>">
-						<td><?php esc_html_e( 'Diferencia', 'multisede-pos' ); ?></td>
-						<td><?php echo wp_kses_post( wc_price( $dif ) ); ?></td>
+						<td><?php esc_html_e( 'Resultado', 'multisede-pos' ); ?></td>
+						<td><?php echo wp_kses_post( $resultado['texto'] ); ?></td>
 					</tr>
 				</tbody>
 			</table>
 
-			<?php if ( $cuadra ) : ?>
-				<p><?php esc_html_e( 'La caja cuadró: lo contado coincide con lo esperado.', 'multisede-pos' ); ?></p>
+			<?php if ( $resultado['cuadra'] ) : ?>
+				<p><?php esc_html_e( 'La caja cuadró: lo que contaste coincide con lo esperado.', 'multisede-pos' ); ?></p>
 			<?php elseif ( $dif < 0 ) : ?>
-				<p><?php esc_html_e( 'Faltó dinero en el cajón: se contó menos de lo esperado. Eso es un faltante.', 'multisede-pos' ); ?></p>
+				<p><?php esc_html_e( 'Faltó plata en el cajón: se contó menos de lo esperado.', 'multisede-pos' ); ?></p>
 			<?php else : ?>
-				<p><?php esc_html_e( 'Sobró dinero en el cajón: se contó más de lo esperado. Suele ser un vuelto mal dado o un movimiento sin registrar.', 'multisede-pos' ); ?></p>
+				<p><?php esc_html_e( 'Sobró plata en el cajón: se contó más de lo esperado. Suele ser un vuelto mal dado o un movimiento que no se registró.', 'multisede-pos' ); ?></p>
 			<?php endif; ?>
 
-			<p><?php esc_html_e( 'Lo importante no es que la diferencia dé cero, sino que quede registrada. En la caja real, este cierre aparecería en el historial de arqueos de la sede, con el nombre del cajero.', 'multisede-pos' ); ?></p>
+			<p><?php
+				printf(
+					/* translators: %s: nombre de la tabla de la pantalla de Caja. */
+					esc_html__( 'Lo importante no es que cuadre siempre, sino que quede registrado. En la caja real, este cierre aparecería en la tabla %s de la sede, con el nombre del cajero.', 'multisede-pos' ),
+					'<strong>' . esc_html__( 'Cierres de caja', 'multisede-pos' ) . '</strong>'
+				);
+			?></p>
 
 			<form method="post" style="display:inline">
 				<?php wp_nonce_field( 'msp_wizard', 'msp_wizard_nonce' ); ?>
@@ -774,7 +780,7 @@ class MSP_Wizard {
 				</button>
 			</form>
 			<p class="description" style="margin-top:8px">
-				<?php esc_html_e( 'Esta caja de práctica no aparece en el reporte de arqueos, así que puedes dejarla o borrarla; da igual.', 'multisede-pos' ); ?>
+				<?php esc_html_e( 'Esta caja de práctica no aparece en los cierres de caja, así que puedes dejarla o borrarla; da igual.', 'multisede-pos' ); ?>
 			</p>
 		</div>
 		<?php
@@ -791,7 +797,7 @@ class MSP_Wizard {
 			<button type="submit" class="button button-primary button-hero"><?php esc_html_e( '✓ Finalizar configuración', 'multisede-pos' ); ?></button>
 		</form>
 		<p style="color:#787c82;margin-top:8px">
-			<?php esc_html_e( 'Te llevamos a la página de Ayuda, donde quedan explicados todos los flujos del día a día: abrir caja, vender en mostrador, entregar un pedido web y cerrar caja con arqueo.', 'multisede-pos' ); ?>
+			<?php esc_html_e( 'Te llevamos a la página de Ayuda, donde quedan explicados todos los flujos del día a día: abrir caja, vender en mostrador, entregar un pedido web y cerrar y cuadrar la caja.', 'multisede-pos' ); ?>
 		</p>
 		<?php
 	}

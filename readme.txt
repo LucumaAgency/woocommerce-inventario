@@ -4,7 +4,7 @@ Tags: woocommerce, inventario, multi-almacen, pos, caja
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 1.4.0
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,11 @@ Requiere WooCommerce activo.
 3. Configura tus sedes en el nuevo menú "Sedes".
 
 == Changelog ==
+
+= 1.5.0 =
+* Lenguaje de tienda en vez de jerga contable: donde decía "arqueo" ahora dice "cuadre". "Cerrar caja (cuadre)", "Cierres de caja", "la caja cuadró".
+* El resultado del cierre se dice en claro. En vez de una "Diferencia: -S/ 2.00" que hay que interpretar, la tabla y el asistente dicen "Cuadró", "Faltaron S/ 2.00" o "Sobraron S/ 2.00".
+* La ayuda indica dónde encontrar el historial: la tabla "Cierres de caja", al final de la pantalla de Caja (solo la ven gerentes y administradores).
 
 = 1.4.0 =
 * Nuevo paso 5 del asistente: "Practicar caja". Guía un turno completo de verdad (abrir la caja, registrar un movimiento y cerrarla con arqueo) explicando cada paso, para entender qué es el efectivo esperado y qué significa la diferencia.

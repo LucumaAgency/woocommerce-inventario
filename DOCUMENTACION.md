@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.2.0
+- **Versión actual:** 1.3.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -87,7 +87,9 @@ multisede-pos/
 │   ├── class-msp-frontend.php     # Compra por tienda: stock visible y validación por sede
 │   ├── class-msp-pos.php          # Punto de venta de mostrador (AJAX)
 │   ├── class-msp-caja.php         # Caja chica: sesiones, movimientos, arqueo
-│   └── class-msp-wizard.php       # Asistente de configuración al activar
+│   ├── class-msp-inventario.php   # Pantalla de stock por sede (ajuste sin tocar el catálogo)
+│   ├── class-msp-wizard.php       # Asistente de configuración al activar
+│   └── class-msp-ayuda.php        # Manual de uso dentro del panel (por rol)
 ├── admin/
 │   ├── css/pos.css                # Estilos del POS
 │   └── js/pos.js                  # Lógica del POS (búsqueda, ticket, cobro)
@@ -182,7 +184,26 @@ Roles creados por el plugin (además del Administrador, que recibe todo):
 | `msp_ver_reportes` | ✅ | ❌ |
 | `msp_gestionar_sedes` | ❌ (solo admin) | ❌ |
 
-Cada usuario se asocia a una o más sedes con la meta `_msp_sedes`. El POS y la Caja solo muestran las sedes del usuario (el administrador ve todas).
+Las capacidades no son decorativas: el CPT `msp_sede` exige `msp_gestionar_sedes` (por eso el gerente no ve el menú Sedes), la pantalla de Inventario exige `msp_ver_stock` para mirar y `msp_gestionar_stock` para ajustar, y el historial de arqueos de la Caja solo lo ve quien tenga `msp_ver_reportes`.
+
+Como el gerente ajusta el stock desde la pantalla de **Inventario** del plugin, no necesita permisos sobre el catálogo de WooCommerce: no puede tocar precios ni publicar productos.
+
+### Asignación usuario ↔ sede
+
+Cada usuario se asocia a una o más sedes con la meta `_msp_sedes`, que se edita en **dos sitios**:
+
+- **Usuarios → editar usuario** → sección "Multisede POS" → casillas de sedes (solo un administrador la ve).
+- **Paso 3 del asistente**, que asigna a todo el personal de golpe.
+
+El listado de Usuarios muestra una columna **Sedes**, que marca en rojo "Sin asignar" a quien todavía no tiene ninguna. El POS, la Caja y el Inventario solo muestran las sedes del usuario; el administrador ve todas.
+
+> Sin sedes asignadas, un cajero entra al POS y no ve ninguna sede: no puede vender. Es el paso que más se olvida al dar de alta a alguien.
+
+### Cambios de roles entre versiones
+
+`register_activation_hook` no se dispara al **actualizar** el plugin (Git Updater), así que las capacidades no se refrescarían solas. Por eso `MSP_Roles::ROLES_VERSION` se compara contra la opción `msp_roles_version` en `init` (prioridad 1, solo en el admin y fuera de AJAX): si cambió, los roles se recrean. Va antes de que se registre el CPT y se construya el menú, porque si no, una capacidad nueva se evaluaría con los roles viejos y la pantalla desaparecería durante esa primera carga.
+
+**Al tocar las capacidades de un rol hay que subir esa constante**, o los usuarios existentes se quedarán con las capacidades viejas.
 
 ---
 
@@ -231,8 +252,14 @@ Añade los campos de stock por sede en la pestaña **Inventario** del producto (
 - Cierre con **arqueo**: esperado (`apertura + ingresos + ventas − egresos`) vs contado → diferencia.
 - Reporte de cierres recientes por sede.
 
+### MSP_Inventario
+Pantalla **Inventario** (capacidad `msp_ver_stock`; ajustar requiere `msp_gestionar_stock`). Muestra, para la sede elegida, el stock, lo reservado y lo disponible de cada producto, con buscador por nombre o SKU y paginación. Los productos variables se listan con una fila por variación. El ajuste es **absoluto** (se escribe el total que hay, no lo que entró) y sincroniza el espejo de Woo. Existe para que el gerente gestione inventario sin permisos sobre el catálogo.
+
 ### MSP_Wizard
-Asistente que aparece al activar: bienvenida (chequea WooCommerce), alta de sedes y guía de recojo. Marca la configuración como completada.
+Asistente que aparece al activar, en cuatro pasos: bienvenida (chequea WooCommerce), alta de sedes, **asignación del personal a sus sedes** y recojo en tienda. Al finalizar lleva a la página de Ayuda. Se puede volver a abrir desde ahí.
+
+### MSP_Ayuda
+Página **Ayuda** (capacidad `msp_ver_stock`), el manual de uso dentro del propio panel. Explica el modelo de stock (físico / reservado / disponible) y los flujos del día a día: abrir caja, vender en el POS, entregar un pedido web, ajustar inventario y cerrar caja con arqueo. El contenido se filtra por capacidades, así que cada rol solo ve lo que le toca, y el administrador ve además la checklist de puesta en marcha. Avisa a quien no tenga sedes asignadas.
 
 ---
 
@@ -248,7 +275,9 @@ Menú **POS** → confirma sede → busca productos → arma el ticket → elige
 El cliente elige su **tienda**, ve solo ese stock, compra y paga → se **reserva** en la sede. Cuando recoge, alguien abre el pedido y pulsa **"Marcar como recogido"** → baja el stock físico.
 
 ### D. Reponer/ajustar inventario (Gerente/Admin)
-Producto → pestaña **Inventario** → cambia el número de la sede → guardar. La columna "Stock por sede" da la vista general.
+Menú **Inventario** → elige la sede → busca el producto → escribe el total real de unidades → **Guardar cambios**. El ajuste es absoluto: si había 4 y llegan 6, se escribe 10.
+
+El administrador también puede hacerlo desde la ficha del producto (pestaña **Inventario** de Woo, y dentro de cada variación en los productos variables).
 
 ### E. Cierre de caja (Cajero)
 Menú **Caja** → ve el efectivo esperado → cuenta el cajón → escribe el **contado** → **Cerrar caja**. Queda el arqueo con la diferencia y se guarda en el reporte.
@@ -264,11 +293,15 @@ Menú **Caja** → ve el efectivo esperado → cuenta el cajón → escribe el *
 4. Las nuevas versiones aparecen como actualización cuando se publica un tag/release.
 
 ### Configuración inicial
-1. Corre el **wizard** (aparece al activar) y crea tus sedes.
-2. Asigna a cada usuario su rol (Gerente/Cajero) y sus sedes (`_msp_sedes`).
-3. Carga el **stock por sede** en cada producto (pestaña Inventario).
+El **asistente** (aparece al activar, y se puede reabrir desde la página de Ayuda) guía los cuatro primeros pasos:
+
+1. Crea tus **sedes**.
+2. Da de alta a cada persona con el rol **Gerente de sede** o **Cajero** y **asígnale sus sedes** (paso 3 del asistente, o el perfil del usuario). Sin sedes asignadas no verá el POS ni la Caja.
+3. Carga el **stock por sede** en el menú **Inventario**.
 4. Activa **"Recogida local"** en WooCommerce → Ajustes → Envío.
 5. Coloca el selector de tienda con `[msp_selector_sede]` donde quieras (header, menú, página de tienda).
+
+La página **Ayuda** queda siempre disponible en el panel con los flujos del día a día explicados para cada rol.
 
 ---
 
@@ -300,13 +333,12 @@ Menú **Caja** → ve el efectivo esperado → cuenta el cajón → escribe el *
 | **1.0.0** | Fase 5 — Caja chica (plugin funcionalmente completo) |
 | **1.1.0** | Compra por tienda (la web opera por sede) |
 | **1.2.0** | Stock disponible y descuento atómico en el POS, reversa de caja al anular una venta, soporte de productos variables |
+| **1.3.0** | Asignación usuario↔sede, roles funcionales, pantalla de Inventario, asistente ampliado y página de Ayuda |
 
 ---
 
 ## 12. Limitaciones conocidas y mejoras futuras
 
-- **Asignación usuario↔sede:** la meta `_msp_sedes` se lee (POS y Caja filtran por ella) pero **todavía no hay pantalla para escribirla**. Hasta que exista, solo los usuarios con `manage_options` ven sedes en POS y Caja. Es el siguiente pendiente.
-- **Capacidades sin uso:** `msp_gestionar_sedes`, `msp_gestionar_stock`, `msp_ver_stock` y `msp_ver_reportes` se crean pero no se comprueban en ninguna parte. Además el rol Gerente de sede no tiene `edit_products`, así que hoy no puede ajustar el stock desde la ficha de producto.
 - **Checkout de bloques:** la integración actual usa el **checkout/tienda clásicos** (incluye constructores como Bricks, que usan el checkout clásico). El checkout de **bloques** (React/Store API) requiere integración adicional pendiente.
 - **Anulación sin caja abierta:** si se anula una venta POS en efectivo cuyo turno ya se cerró y el cajero no tiene otra caja abierta, el egreso no se registra (no se toca un arqueo cerrado): queda una nota en el pedido para ajustarlo a mano.
 - **Banner automático en temas con layout propio:** el banner se engancha a `woocommerce_before_main_content`; en temas/constructores que no lo disparen, colocar el selector con el shortcode manualmente.

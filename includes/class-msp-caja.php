@@ -645,6 +645,11 @@ class MSP_Caja {
 	private function tabla_reportes( $sede_id ) {
 		global $wpdb;
 
+		// El historial de arqueos es cosa de gerencia, no del cajero.
+		if ( ! current_user_can( 'msp_ver_reportes' ) ) {
+			return;
+		}
+
 		$sesiones = $wpdb->get_results(
 			$wpdb->prepare(
 				'SELECT * FROM ' . self::tabla_sesiones() . "

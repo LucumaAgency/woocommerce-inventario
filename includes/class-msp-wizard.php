@@ -113,10 +113,38 @@ class MSP_Wizard {
 			exit;
 		}
 
+		if ( 'asignar_personal' === $accion ) {
+			$this->asignar_personal_desde_post();
+			wp_safe_redirect( admin_url( 'admin.php?page=' . self::PAGE . '&step=3&asignado=1' ) );
+			exit;
+		}
+
 		if ( 'finalizar' === $accion ) {
 			update_option( self::OPT_DONE, 1 );
-			wp_safe_redirect( admin_url( 'edit.php?post_type=' . MSP_Sedes::CPT ) );
+			wp_safe_redirect( admin_url( 'admin.php?page=' . MSP_Ayuda::PAGE ) );
 			exit;
+		}
+	}
+
+	/**
+	 * Guarda las sedes de cada persona del paso "Personal".
+	 */
+	private function asignar_personal_desde_post() {
+		// La lista de usuarios va en un campo aparte: un usuario al que se le
+		// desmarcan todas las sedes no aparecería en msp_personal.
+		if ( ! isset( $_POST['msp_personal_ids'] ) || ! is_array( $_POST['msp_personal_ids'] ) ) {
+			return;
+		}
+
+		$ids      = array_map( 'absint', wp_unslash( $_POST['msp_personal_ids'] ) ); // phpcs:ignore WordPress.Security.ValidatedSanitized
+		$personal = isset( $_POST['msp_personal'] ) ? (array) wp_unslash( $_POST['msp_personal'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitized
+
+		foreach ( $ids as $user_id ) {
+			if ( ! $user_id ) {
+				continue;
+			}
+			$sedes = isset( $personal[ $user_id ] ) ? (array) $personal[ $user_id ] : array();
+			MSP_Roles::set_sedes_de_usuario( $user_id, $sedes );
 		}
 	}
 
@@ -165,6 +193,9 @@ class MSP_Wizard {
 						$this->paso_sedes();
 						break;
 					case 3:
+						$this->paso_personal();
+						break;
+					case 4:
 						$this->paso_recojo();
 						break;
 					case 1:
@@ -187,7 +218,8 @@ class MSP_Wizard {
 		$pasos = array(
 			1 => __( 'Bienvenida', 'multisede-pos' ),
 			2 => __( 'Sedes', 'multisede-pos' ),
-			3 => __( 'Recojo y fin', 'multisede-pos' ),
+			3 => __( 'Personal', 'multisede-pos' ),
+			4 => __( 'Recojo y fin', 'multisede-pos' ),
 		);
 		echo '<div style="display:flex;gap:8px;margin-top:12px">';
 		foreach ( $pasos as $n => $label ) {
@@ -314,13 +346,116 @@ class MSP_Wizard {
 	}
 
 	/**
-	 * Paso 3: recojo en tienda y finalización.
+	 * Paso 3: personal — asignar cada cajero/gerente a sus sedes.
+	 */
+	private function paso_personal() {
+		$sedes = MSP_Sedes::obtener_sedes_activas();
+
+		$personal = get_users(
+			array(
+				'role__in' => array( 'msp_cajero', 'msp_gerente_sede' ),
+				'orderby'  => 'display_name',
+			)
+		);
+
+		if ( isset( $_GET['asignado'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			echo '<div class="notice notice-success inline"><p>' .
+				esc_html__( 'Sedes asignadas.', 'multisede-pos' ) . '</p></div>';
+		}
+		?>
+		<h2><?php esc_html_e( 'Quién trabaja en cada sede', 'multisede-pos' ); ?></h2>
+		<p><?php esc_html_e( 'El POS y la Caja solo muestran las sedes de cada persona. Quien no tenga sede asignada entrará y no verá nada que hacer.', 'multisede-pos' ); ?></p>
+
+		<?php if ( empty( $sedes ) ) : ?>
+			<div class="notice notice-warning inline"><p>
+				<?php esc_html_e( 'Primero crea al menos una sede en el paso anterior.', 'multisede-pos' ); ?>
+			</p></div>
+
+		<?php elseif ( empty( $personal ) ) : ?>
+			<div class="notice notice-info inline"><p>
+				<?php
+				printf(
+					/* translators: %s: enlace para crear usuarios. */
+					esc_html__( 'Todavía no hay nadie con el rol "Cajero" o "Gerente de sede". Créalos en %s y vuelve aquí para asignarles su tienda.', 'multisede-pos' ),
+					'<a href="' . esc_url( admin_url( 'user-new.php' ) ) . '" target="_blank"><strong>' .
+						esc_html__( 'Usuarios → Añadir nuevo', 'multisede-pos' ) . '</strong></a>'
+				);
+				?>
+			</p></div>
+
+		<?php else : ?>
+			<form method="post" action="">
+				<?php wp_nonce_field( 'msp_wizard', 'msp_wizard_nonce' ); ?>
+				<input type="hidden" name="msp_wizard_action" value="asignar_personal" />
+
+				<table class="widefat striped">
+					<thead>
+						<tr>
+							<th><?php esc_html_e( 'Persona', 'multisede-pos' ); ?></th>
+							<th><?php esc_html_e( 'Sedes donde trabaja', 'multisede-pos' ); ?></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( $personal as $user ) : ?>
+							<?php $suyas = MSP_Roles::sedes_de_usuario( $user->ID ); ?>
+							<tr>
+								<td>
+									<input type="hidden" name="msp_personal_ids[]" value="<?php echo esc_attr( $user->ID ); ?>" />
+									<strong><?php echo esc_html( $user->display_name ); ?></strong><br>
+									<span style="color:#787c82">
+										<?php
+										echo esc_html(
+											in_array( 'msp_gerente_sede', (array) $user->roles, true )
+												? __( 'Gerente de sede', 'multisede-pos' )
+												: __( 'Cajero', 'multisede-pos' )
+										);
+										?>
+									</span>
+								</td>
+								<td>
+									<?php foreach ( MSP_Roles::sedes_para_asignar( $user->ID ) as $sede ) : ?>
+										<label style="display:inline-block;margin:0 16px 6px 0">
+											<input type="checkbox"
+												name="msp_personal[<?php echo esc_attr( $user->ID ); ?>][]"
+												value="<?php echo esc_attr( $sede['id'] ); ?>"
+												<?php checked( in_array( $sede['id'], $suyas, true ) ); ?> />
+											<?php echo esc_html( $sede['titulo'] ); ?>
+											<?php if ( $sede['inactiva'] ) : ?>
+												<span style="color:#996800">(<?php esc_html_e( 'inactiva', 'multisede-pos' ); ?>)</span>
+											<?php endif; ?>
+										</label>
+									<?php endforeach; ?>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+
+				<p style="margin-top:16px">
+					<button type="submit" class="button button-secondary"><?php esc_html_e( 'Guardar asignaciones', 'multisede-pos' ); ?></button>
+				</p>
+			</form>
+		<?php endif; ?>
+
+		<p style="color:#787c82">
+			<?php esc_html_e( 'Esto también se puede cambiar después desde el perfil de cada usuario.', 'multisede-pos' ); ?>
+		</p>
+
+		<hr style="margin:24px 0">
+		<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE . '&step=4' ) ); ?>" class="button button-primary">
+			<?php esc_html_e( 'Continuar →', 'multisede-pos' ); ?>
+		</a>
+		<?php
+	}
+
+	/**
+	 * Paso 4: recojo en tienda y finalización.
 	 */
 	private function paso_recojo() {
 		$lp_url = esc_url( admin_url( 'admin.php?page=wc-settings&tab=shipping' ) );
 		?>
 		<h2><?php esc_html_e( 'Recojo en tienda', 'multisede-pos' ); ?></h2>
-		<p><?php esc_html_e( 'El recojo en tienda usa el método "Local Pickup" de WooCommerce. Por ahora no se ofrece delivery por la web.', 'multisede-pos' ); ?></p>
+		<p><?php esc_html_e( 'El recojo en tienda usa el método "Recogida local" de WooCommerce. Por ahora no se ofrece delivery por la web.', 'multisede-pos' ); ?></p>
 		<ol>
 			<li><?php
 				printf(
@@ -330,14 +465,33 @@ class MSP_Wizard {
 				);
 			?></li>
 			<li><?php esc_html_e( 'Desactiva los demás métodos de envío si solo quieres recojo.', 'multisede-pos' ); ?></li>
+			<li><?php
+				printf(
+					/* translators: %s: shortcode del selector de tienda. */
+					esc_html__( 'Coloca el selector de tienda en la web con el shortcode %s. El cliente elige su tienda y desde ese momento solo ve el stock de esa sede; en el checkout, su pedido queda fijado a esa sede de recojo.', 'multisede-pos' ),
+					'<code>[msp_selector_sede]</code>'
+				);
+			?></li>
 		</ol>
-		<p style="color:#787c82"><?php esc_html_e( 'En la siguiente fase añadiremos la selección de sede de recojo en el checkout.', 'multisede-pos' ); ?></p>
+
+		<h3 style="margin-top:24px"><?php esc_html_e( 'Falta solo el stock', 'multisede-pos' ); ?></h3>
+		<p><?php
+			printf(
+				/* translators: %s: enlace a la pantalla de inventario. */
+				esc_html__( 'Carga las existencias de cada sede en %s. Hasta que lo hagas no se podrá vender nada: todo figura en cero.', 'multisede-pos' ),
+				'<a href="' . esc_url( admin_url( 'admin.php?page=' . MSP_Inventario::PAGE ) ) . '"><strong>' .
+					esc_html__( 'Inventario', 'multisede-pos' ) . '</strong></a>'
+			);
+		?></p>
 
 		<form method="post" action="" style="margin-top:24px">
 			<?php wp_nonce_field( 'msp_wizard', 'msp_wizard_nonce' ); ?>
 			<input type="hidden" name="msp_wizard_action" value="finalizar" />
-			<button type="submit" class="button button-primary button-hero"><?php esc_html_e( '✓ Finalizar configuración', 'multisede-pos' ); ?></button>
+			<button type="submit" class="button button-primary button-hero"><?php esc_html_e( '✓ Finalizar y ver cómo se usa', 'multisede-pos' ); ?></button>
 		</form>
+		<p style="color:#787c82;margin-top:8px">
+			<?php esc_html_e( 'Al finalizar te llevamos a la página de Ayuda, donde están explicados los flujos del día a día: abrir caja, vender en mostrador, entregar un pedido web y cerrar caja con arqueo.', 'multisede-pos' ); ?>
+		</p>
 		<?php
 	}
 }

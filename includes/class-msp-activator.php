@@ -25,6 +25,7 @@ class MSP_Activator {
 	public static function activate() {
 		self::crear_tablas();
 		MSP_Roles::crear_roles();
+		update_option( 'msp_roles_version', MSP_Roles::ROLES_VERSION );
 
 		// Registramos el CPT antes de refrescar las reglas de reescritura.
 		MSP_Sedes::registrar_cpt();

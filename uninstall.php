@@ -57,6 +57,8 @@ if ( $admin ) {
 
 // Opciones.
 delete_option( 'msp_db_version' );
+delete_option( 'msp_roles_version' );
+delete_option( 'msp_wizard_done' );
 
 // Metadatos de usuario (asignación de sedes).
 delete_metadata( 'user', 0, '_msp_sedes', '', true );

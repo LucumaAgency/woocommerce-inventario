@@ -4,7 +4,7 @@ Tags: woocommerce, inventario, multi-almacen, pos, caja
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 1.2.0
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,13 @@ Requiere WooCommerce activo.
 3. Configura tus sedes en el nuevo menú "Sedes".
 
 == Changelog ==
+
+= 1.3.0 =
+* Asignación de sedes a los usuarios: casillas en el perfil de cada usuario, columna "Sedes" en el listado de usuarios y un paso nuevo en el asistente para asignar a todo el personal de golpe. Sin esto, el POS y la Caja solo funcionaban para administradores.
+* Roles funcionales: el menú Sedes exige "msp_gestionar_sedes" (solo admin), el historial de arqueos exige "msp_ver_reportes" (el cajero ya no lo ve) y los roles se refrescan solos al actualizar el plugin.
+* Nueva pantalla "Inventario": el gerente ve y ajusta el stock, lo reservado y lo disponible de su sede, con buscador y soporte de variaciones, sin necesidad de permisos sobre el catálogo de WooCommerce.
+* Nueva página "Ayuda": manual de uso dentro del panel, filtrado por rol, con los flujos del día a día (abrir caja, vender en mostrador, entregar un pedido web, ajustar inventario, cerrar caja con arqueo).
+* El asistente pasa a cuatro pasos, termina en la Ayuda y ya no muestra texto de fases pendientes que hace tiempo se construyeron.
 
 = 1.2.0 =
 * El POS vende contra el stock disponible (físico menos reservado): ya no puede vender unidades apartadas para un pedido web pendiente de recojo.

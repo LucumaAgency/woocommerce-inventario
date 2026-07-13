@@ -20,6 +20,10 @@ class MSP_Plugin {
 	public function run() {
 		add_action( 'init', array( $this, 'cargar_textdomain' ) );
 
+		// Roles, capacidades y asignación usuario↔sede.
+		$roles = new MSP_Roles();
+		$roles->init();
+
 		// Módulo de sedes (Fase 1).
 		$sedes = new MSP_Sedes();
 		$sedes->init();
@@ -44,13 +48,17 @@ class MSP_Plugin {
 		$caja = new MSP_Caja();
 		$caja->init();
 
-		// Asistente de configuración (wizard).
+		// Pantallas de solo-admin: inventario, asistente y ayuda.
 		if ( is_admin() ) {
+			$inventario = new MSP_Inventario();
+			$inventario->init();
+
 			$wizard = new MSP_Wizard();
 			$wizard->init();
-		}
 
-		// Las fases siguientes (stock, recojo, POS, caja) se engancharán aquí.
+			$ayuda = new MSP_Ayuda();
+			$ayuda->init();
+		}
 	}
 
 	/**

@@ -17,11 +17,19 @@ class MSP_Caja {
 	const PAGE = 'msp-caja';
 
 	/**
+	 * Tope de ventas que se listan en el turno. Si se alcanza, se avisa: los
+	 * totales del pie serían parciales y no queremos que mientan en silencio.
+	 */
+	const MAX_VENTAS_TURNO = 300;
+
+	/**
 	 * Engancha hooks.
 	 */
 	public function init() {
 		add_action( 'admin_menu', array( $this, 'registrar_pagina' ) );
 		add_action( 'admin_init', array( $this, 'procesar' ) );
+		// Permite filtrar pedidos por meta propia con el almacenamiento clásico.
+		add_filter( 'woocommerce_order_data_store_cpt_get_orders_query', array( $this, 'filtrar_pedidos_por_meta' ), 10, 2 );
 		// Registrar las ventas POS en efectivo como movimiento de caja.
 		add_action( 'msp_pos_venta_creada', array( $this, 'registrar_venta_pos' ), 10, 3 );
 		// Devolver el efectivo si esa venta se anula.
@@ -128,6 +136,115 @@ class MSP_Caja {
 		);
 
 		return (int) $wpdb->insert_id;
+	}
+
+	/**
+	 * Ventas del POS hechas durante un turno de caja.
+	 *
+	 * Se buscan por sede + cajero + rango de fechas del turno, en lugar de por
+	 * los movimientos de caja: los movimientos solo existen para las ventas en
+	 * efectivo, y aquí queremos ver TODAS las del turno (también tarjeta y
+	 * Yape/Plin), que es justo lo que explica por qué el cajón no tiene tanto
+	 * dinero como se vendió.
+	 *
+	 * @param object $sesion Sesión de caja.
+	 * @return WC_Order[]
+	 */
+	public static function ventas_de_sesion( $sesion ) {
+		if ( ! function_exists( 'wc_get_orders' ) ) {
+			return array();
+		}
+
+		// Los rangos de fecha de wc_get_orders se comparan contra date_created_gmt
+		// (UTC), pero abierta_at está en la hora local del sitio. Hay que
+		// convertir: si no, en Lima (UTC−5) la ventana se desplaza 5 horas y las
+		// ventas recientes no aparecen justo cuando el cajero está cuadrando.
+		$desde = (int) get_gmt_from_date( $sesion->abierta_at, 'U' );
+		$hasta = (int) get_gmt_from_date(
+			$sesion->cerrada_at ? $sesion->cerrada_at : current_time( 'mysql' ),
+			'U'
+		);
+
+		if ( ! $desde || ! $hasta ) {
+			return array();
+		}
+
+		$args = array(
+			'limit'        => self::MAX_VENTAS_TURNO,
+			'orderby'      => 'date',
+			'order'        => 'ASC',
+			'date_created' => $desde . '...' . $hasta,
+		);
+
+		$filtros = array(
+			array(
+				'key'   => '_msp_sede_id',
+				'value' => (int) $sesion->sede_id,
+			),
+			array(
+				'key'   => '_msp_origen',
+				'value' => 'pos',
+			),
+			array(
+				'key'   => '_msp_cajero_id',
+				'value' => (int) $sesion->cajero_id,
+			),
+		);
+
+		// HPOS entiende meta_query; el almacenamiento clásico lo DESCARTA en
+		// silencio (WC_Data_Store_WP::get_wp_query_args lo salta), y sin filtros
+		// la consulta devolvería los pedidos de todas las sedes y cajeros. Por
+		// eso ahí se pasa por una clave propia que traduce nuestro filtro.
+		if ( self::hpos_activo() ) {
+			$args['meta_query'] = $filtros; // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+		} else {
+			$args['msp_meta_query'] = $filtros;
+		}
+
+		$pedidos = wc_get_orders( $args );
+
+		return is_array( $pedidos ) ? $pedidos : array();
+	}
+
+	/**
+	 * ¿WooCommerce está guardando los pedidos en sus propias tablas (HPOS)?
+	 *
+	 * @return bool
+	 */
+	public static function hpos_activo() {
+		return class_exists( '\Automattic\WooCommerce\Utilities\OrderUtil' ) &&
+			\Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+	}
+
+	/**
+	 * Traduce nuestro filtro de meta al almacenamiento clásico de pedidos.
+	 *
+	 * Es la vía documentada por WooCommerce para filtrar por meta propia cuando
+	 * los pedidos viven en la tabla de posts.
+	 *
+	 * @param array $wp_query_args Argumentos de WP_Query.
+	 * @param array $query_vars    Argumentos originales de wc_get_orders.
+	 * @return array
+	 */
+	public function filtrar_pedidos_por_meta( $wp_query_args, $query_vars ) {
+		if ( empty( $query_vars['msp_meta_query'] ) || ! is_array( $query_vars['msp_meta_query'] ) ) {
+			return $wp_query_args;
+		}
+
+		$actual                       = isset( $wp_query_args['meta_query'] ) ? (array) $wp_query_args['meta_query'] : array();
+		$wp_query_args['meta_query']  = array_merge( $actual, $query_vars['msp_meta_query'] ); // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+
+		return $wp_query_args;
+	}
+
+	/**
+	 * ¿Ese método de pago mete efectivo en el cajón?
+	 *
+	 * @param string $metodo Método de pago del POS.
+	 * @return bool
+	 */
+	public static function es_efectivo( $metodo ) {
+		return 'efectivo' === $metodo;
 	}
 
 	/**
@@ -753,6 +870,134 @@ class MSP_Caja {
 			echo '<p>' . esc_html__( 'Sin movimientos todavía.', 'multisede-pos' ) . '</p>';
 		}
 		echo '</div></div>';
+
+		$this->tabla_ventas_turno( $sesion );
+	}
+
+	/**
+	 * Ventas hechas en este turno: qué se vendió y cómo se pagó.
+	 *
+	 * No cambia ningún importe de la caja: es un reporte de lectura. Está para
+	 * responder la pregunta que todo cajero se hace al cuadrar ("¿y todo lo que
+	 * vendí, dónde está?"): lo cobrado con tarjeta o Yape no está en el cajón.
+	 *
+	 * @param object $sesion Sesión de caja.
+	 */
+	private function tabla_ventas_turno( $sesion ) {
+		$pedidos = self::ventas_de_sesion( $sesion );
+
+		echo '<h2 style="margin-top:30px">' . esc_html__( 'Ventas de este turno', 'multisede-pos' ) . '</h2>';
+
+		if ( empty( $pedidos ) ) {
+			echo '<p>' . esc_html__( 'Todavía no has vendido nada en este turno.', 'multisede-pos' ) . '</p>';
+			return;
+		}
+
+		$etiquetas = array(
+			'efectivo'  => __( 'Efectivo', 'multisede-pos' ),
+			'tarjeta'   => __( 'Tarjeta', 'multisede-pos' ),
+			'yape_plin' => __( 'Yape / Plin', 'multisede-pos' ),
+			'otro'      => __( 'Otro', 'multisede-pos' ),
+		);
+
+		$total_vendido  = 0.0;
+		$total_efectivo = 0.0;
+		$truncado       = count( $pedidos ) >= self::MAX_VENTAS_TURNO;
+		$puede_ver_pedido = current_user_can( 'edit_shop_orders' );
+
+		echo '<table class="widefat striped"><thead><tr>';
+		echo '<th style="width:70px">' . esc_html__( 'Hora', 'multisede-pos' ) . '</th>';
+		echo '<th style="width:90px">' . esc_html__( 'Pedido', 'multisede-pos' ) . '</th>';
+		echo '<th>' . esc_html__( 'Qué se vendió', 'multisede-pos' ) . '</th>';
+		echo '<th style="width:130px">' . esc_html__( 'Pago', 'multisede-pos' ) . '</th>';
+		echo '<th style="width:110px">' . esc_html__( 'Total', 'multisede-pos' ) . '</th>';
+		echo '</tr></thead><tbody>';
+
+		foreach ( $pedidos as $pedido ) {
+			$metodo   = (string) $pedido->get_meta( '_msp_pos_metodo' );
+			$efectivo = self::es_efectivo( $metodo );
+			$total    = (float) $pedido->get_total();
+			$anulado  = in_array( $pedido->get_status(), array( 'cancelled', 'refunded' ), true );
+
+			if ( ! $anulado ) {
+				$total_vendido += $total;
+				if ( $efectivo ) {
+					$total_efectivo += $total;
+				}
+			}
+
+			// Qué se vendió, en cristiano.
+			$lineas = array();
+			foreach ( $pedido->get_items() as $item ) {
+				$lineas[] = $item->get_quantity() . ' × ' . $item->get_name();
+			}
+
+			$fecha = $pedido->get_date_created();
+
+			$reembolsado = (float) $pedido->get_total_refunded();
+
+			echo '<tr' . ( $anulado ? ' style="opacity:.55"' : '' ) . '>';
+			echo '<td>' . esc_html( $fecha ? $fecha->date_i18n( 'H:i' ) : '—' ) . '</td>';
+
+			// El cajero no tiene permiso para abrir pedidos: no le damos un
+			// enlace que solo le va a dar "acceso denegado".
+			echo '<td>';
+			if ( $puede_ver_pedido ) {
+				echo '<a href="' . esc_url( $pedido->get_edit_order_url() ) . '">#' .
+					esc_html( $pedido->get_order_number() ) . '</a>';
+			} else {
+				echo '#' . esc_html( $pedido->get_order_number() );
+			}
+			echo '</td>';
+
+			echo '<td>' . esc_html( implode( ', ', $lineas ) );
+			if ( $anulado ) {
+				echo ' <strong style="color:#b32d2e">(' . esc_html__( 'anulada', 'multisede-pos' ) . ')</strong>';
+			} elseif ( $reembolsado > 0 ) {
+				echo ' <strong style="color:#996800">(' . sprintf(
+					/* translators: %s: importe devuelto. */
+					esc_html__( 'devuelto en parte: %s', 'multisede-pos' ),
+					wp_kses_post( wc_price( $reembolsado ) )
+				) . ')</strong>';
+			}
+			echo '</td>';
+
+			echo '<td>' . esc_html( isset( $etiquetas[ $metodo ] ) ? $etiquetas[ $metodo ] : $metodo );
+			if ( ! $efectivo && ! $anulado ) {
+				echo '<br><span style="color:#787c82;font-size:11px">' .
+					esc_html__( 'no entra al cajón', 'multisede-pos' ) . '</span>';
+			}
+			echo '</td>';
+
+			echo '<td>' . wp_kses_post( wc_price( $total ) ) . '</td>';
+			echo '</tr>';
+		}
+
+		echo '</tbody><tfoot>';
+		echo '<tr><th colspan="4">' . esc_html__( 'Total vendido en el turno', 'multisede-pos' ) .
+			'</th><th>' . wp_kses_post( wc_price( $total_vendido ) ) . '</th></tr>';
+		echo '<tr><th colspan="4">' . esc_html__( 'De eso, en efectivo (lo que sí está en el cajón)', 'multisede-pos' ) .
+			'</th><th>' . wp_kses_post( wc_price( $total_efectivo ) ) . '</th></tr>';
+		echo '</tfoot></table>';
+
+		if ( $truncado ) {
+			printf(
+				'<div class="notice notice-warning inline"><p>%s</p></div>',
+				esc_html(
+					sprintf(
+						/* translators: %d: número máximo de ventas listadas. */
+						__( 'Este turno tiene más de %d ventas. Se muestran las primeras, así que los totales de aquí abajo son parciales. El efectivo esperado de la caja sí está completo: no te fíes de esta tabla para cuadrar.', 'multisede-pos' ),
+						self::MAX_VENTAS_TURNO
+					)
+				)
+			);
+		}
+
+		if ( $total_efectivo < $total_vendido ) {
+			echo '<p class="description">' .
+				esc_html__( 'La diferencia entre ambos totales se cobró con tarjeta, Yape/Plin u otro medio: ese dinero no está en el cajón y por eso no cuenta en el efectivo esperado.', 'multisede-pos' ) .
+				'</p>';
+		}
 	}
 
 	/**

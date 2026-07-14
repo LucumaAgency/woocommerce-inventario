@@ -196,6 +196,13 @@ class MSP_Ayuda {
 					<p><?php
 						printf(
 							/* translators: %s: nombre de la tabla en la pantalla de Caja. */
+							esc_html__( 'Si no te cuadra lo que vendiste con lo que hay en el cajón, mira la tabla %s: ahí ves cada venta del turno, qué se vendió y cómo se pagó, y cuánto de todo eso fue realmente efectivo.', 'multisede-pos' ),
+							'<strong>' . esc_html__( 'Ventas de este turno', 'multisede-pos' ) . '</strong>'
+						);
+					?></p>
+					<p><?php
+						printf(
+							/* translators: %s: nombre de la tabla en la pantalla de Caja. */
 							esc_html__( 'Cada cierre queda guardado en la tabla %s, al final de la pantalla de Caja, con el nombre del cajero y el resultado. Solo la ve el gerente o el administrador.', 'multisede-pos' ),
 							'<strong>' . esc_html__( 'Cierres de caja', 'multisede-pos' ) . '</strong>'
 						);

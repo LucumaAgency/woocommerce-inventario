@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.5.0
+- **Versión actual:** 1.6.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -366,6 +366,7 @@ pelo, para no volver a meter jerga en la interfaz.
 ## 12. Limitaciones conocidas y mejoras futuras
 
 - **Checkout de bloques:** la integración actual usa el **checkout/tienda clásicos** (incluye constructores como Bricks, que usan el checkout clásico). El checkout de **bloques** (React/Store API) requiere integración adicional pendiente.
+- **Reembolsos parciales:** el plugin solo reacciona a la anulación **total** de una venta (estados `cancelled` y `refunded`). Un reembolso parcial deja el pedido en `completed`, así que **no devuelve stock a la sede ni saca el efectivo de la caja**. La tabla "Ventas de este turno" marca esos pedidos como "devuelto en parte", pero los totales siguen contando la venta completa, **a propósito**: es lo que la caja registró, y una tabla que contradiga el cuadre confunde más de lo que ayuda. Si saraih hace devoluciones parciales, esto hay que resolverlo.
 - **Anulación sin caja abierta:** si se anula una venta POS en efectivo cuyo turno ya se cerró y el cajero no tiene otra caja abierta, el egreso no se registra (no se toca un arqueo cerrado): queda una nota en el pedido para ajustarlo a mano.
 - **Banner automático en temas con layout propio:** el banner se engancha a `woocommerce_before_main_content`; en temas/constructores que no lo disparen, colocar el selector con el shortcode manualmente.
 - **Otras ideas:** reportes consolidados entre sedes, impresión de ticket, lector de código de barras por hardware, traslados de stock entre sedes.

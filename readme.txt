@@ -4,7 +4,7 @@ Tags: woocommerce, inventario, multi-almacen, pos, caja
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 1.5.0
+Stable tag: 1.6.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,11 @@ Requiere WooCommerce activo.
 3. Configura tus sedes en el nuevo menú "Sedes".
 
 == Changelog ==
+
+= 1.6.0 =
+* Nueva tabla "Ventas de este turno" en la pantalla de Caja: hora, pedido, qué se vendió, cómo se pagó y total. Al pie, el total vendido y cuánto de eso fue efectivo.
+* Responde la duda clásica al cuadrar ("vendí S/ 500 y en el cajón hay S/ 300"): las ventas con tarjeta o Yape/Plin salen marcadas como "no entra al cajón", porque ese dinero no está ahí.
+* Es un reporte de solo lectura: no altera ningún importe de la caja ni del cuadre.
 
 = 1.5.0 =
 * Lenguaje de tienda en vez de jerga contable: donde decía "arqueo" ahora dice "cuadre". "Cerrar caja (cuadre)", "Cierres de caja", "la caja cuadró".

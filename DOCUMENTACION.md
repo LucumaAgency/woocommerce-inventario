@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.6.0
+- **Versión actual:** 1.7.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -140,6 +140,22 @@ Prefijo de código: `msp_` / `MSP_`. Textdomain: `multisede-pos`.
 | `pedido_id` | Pedido asociado (en ventas POS) |
 | `creado_at` | Fecha |
 
+**`wp_msp_comprobantes`** — comprobantes electrónicos SUNAT (boletas). Añadida en v1.7.0 (Fase 1 de facturación). El correlativo se reserva con un `INSERT` que el índice `UNIQUE (serie, correlativo)` rechaza si otro cajero se adelantó, y se reintenta con el siguiente: no puede repetir ni saltar números (mismo principio que `MSP_Stock::descontar_si_hay`). **Nunca se calcula con `SELECT MAX()+1` sin la red del índice único.**
+
+| Columna | Descripción |
+|---|---|
+| `id` | PK |
+| `pedido_id` | Pedido Woo asociado (POS o web) |
+| `sede_id` | Sede emisora |
+| `tipo` | `boleta` (reservado sitio para `factura`, `nota_credito`) |
+| `serie`, `correlativo` | Número del comprobante — **UNIQUE (serie, correlativo)** |
+| `cliente_tipo_doc`, `cliente_num_doc`, `cliente_nombre` | DNI si el monto lo exige (> S/ 700) |
+| `total`, `igv` | Importes declarados |
+| `estado` | `pendiente` / `enviado` / `aceptado` / `rechazado` / `anulado` |
+| `intentos`, `ultimo_error` | Para la cola y el diagnóstico (Fase 3) |
+| `hash`, `xml_path`, `cdr_path`, `pdf_url` | Documentos a conservar por ley (Fase 2/5) |
+| `emitido_at`, `enviado_at` | Fechas (el plazo de 7 días se cuenta desde `emitido_at`) |
+
 ### Custom Post Type: `msp_sede`
 
 Una entrada por tienda, con metadatos:
@@ -151,6 +167,7 @@ Una entrada por tienda, con metadatos:
 | `_msp_vende_mostrador` | Tiene POS |
 | `_msp_es_virtual` | Es la tienda virtual (no física) |
 | `_msp_activa` | Sede activa |
+| `_msp_serie_boleta` | Serie de boleta electrónica de la sede (ej. `B001`). Única por sede. Añadida en v1.7.0 |
 
 ### Metadatos en el pedido de WooCommerce
 
@@ -271,6 +288,16 @@ El paso 5 guía un turno **real** (abrir caja → registrar un movimiento → ce
 ### MSP_Ayuda
 Página **Ayuda** (capacidad `msp_ver_stock`), el manual de uso dentro del propio panel. Explica el modelo de stock (físico / reservado / disponible) y los flujos del día a día: abrir caja, vender en el POS, entregar un pedido web, ajustar inventario y cerrar caja con arqueo. El contenido se filtra por capacidades, así que cada rol solo ve lo que le toca, y el administrador ve además la checklist de puesta en marcha. Avisa a quien no tenga sedes asignadas.
 
+### MSP_Comprobante (Fase 1 de boletas — v1.7.0)
+Capa que emitirá los comprobantes electrónicos SUNAT. El POS y la web **no hablan con SUNAT**: hablan con esta clase. En la v1.7.0 solo está la **base de datos**: asigna serie + correlativo y guarda la fila como `pendiente`. La firma y el envío (driver **Greenter**, contra el sandbox de SUNAT) llegan en la Fase 2.
+
+- `serie_de_sede( $sede_id )` / `serie_valida( $serie )` — la serie (ej. `B001`) vive en el meta `_msp_serie_boleta` de cada sede. Formato SUNAT: empieza con `B` y 4 caracteres.
+- `serie_en_uso( $serie, $excluir_sede_id )` — impide que dos sedes compartan serie (se pisarían el correlativo). Se valida al guardar la sede; si choca, la serie no se guarda y aparece un aviso.
+- `reservar( $datos )` — reserva atómica del siguiente correlativo y crea el comprobante. Devuelve la fila o un `WP_Error`.
+- `obtener()`, `obtener_por_pedido()`, `numero()` — lectura y número legible (`B001-00000042`).
+
+**Roadmap de facturación** (plan completo: `PLAN-BOLETAS.md` en la carpeta del cliente): F1 base ✓ · F2 Greenter + emisión · F3 cola/reintentos/pantalla Comprobantes · F4 anulaciones (resumen diario) · F5 ticket con QR + PDF.
+
 ---
 
 ## 8. Flujos de operación (día a día)
@@ -346,6 +373,8 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.3.0** | Asignación usuario↔sede, roles funcionales, pantalla de Inventario, asistente ampliado y página de Ayuda |
 | **1.4.0** | Paso de práctica de caja en el asistente (turno real, aislado y borrable) y migración automática del esquema al actualizar |
 | **1.5.0** | Lenguaje de tienda: "arqueo" → "cuadre", y el resultado del cierre se dice en claro (cuadró / faltaron / sobraron) |
+| **1.6.0** | Tabla "Ventas de este turno" en la pantalla de Caja |
+| **1.7.0** | **Boletas Fase 1** — tabla `wp_msp_comprobantes`, reserva de correlativo a prueba de carreras, serie de boleta por sede (`_msp_serie_boleta`). Base de facturación electrónica; aún no emite |
 
 ---
 

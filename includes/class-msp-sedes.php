@@ -25,6 +25,7 @@ class MSP_Sedes {
 		add_action( 'save_post_' . self::CPT, array( $this, 'guardar_meta' ), 10, 2 );
 		add_filter( 'manage_' . self::CPT . '_posts_columns', array( $this, 'columnas' ) );
 		add_action( 'manage_' . self::CPT . '_posts_custom_column', array( $this, 'columna_contenido' ), 10, 2 );
+		add_action( 'admin_notices', array( $this, 'mostrar_avisos' ) );
 	}
 
 	/**
@@ -108,6 +109,7 @@ class MSP_Sedes {
 		$vende_mostrador = get_post_meta( $post->ID, '_msp_vende_mostrador', true );
 		$es_virtual      = get_post_meta( $post->ID, '_msp_es_virtual', true );
 		$activa          = get_post_meta( $post->ID, '_msp_activa', true );
+		$serie_boleta    = get_post_meta( $post->ID, MSP_Comprobante::META_SERIE, true );
 
 		// Por defecto una sede nueva está activa y vende en mostrador.
 		if ( '' === $activa && 'auto-draft' === $post->post_status ) {
@@ -149,6 +151,17 @@ class MSP_Sedes {
 				<input type="checkbox" name="msp_es_virtual" value="1" <?php checked( $es_virtual, '1' ); ?> />
 				<?php esc_html_e( 'Es la tienda virtual (no es una tienda física)', 'multisede-pos' ); ?>
 			</label>
+		</p>
+
+		<p class="msp-field">
+			<label for="msp_serie_boleta"><?php esc_html_e( 'Serie de boleta electrónica', 'multisede-pos' ); ?></label>
+			<input type="text" id="msp_serie_boleta" name="msp_serie_boleta" class="widefat" maxlength="4"
+				style="text-transform:uppercase;max-width:120px"
+				value="<?php echo esc_attr( $serie_boleta ); ?>"
+				placeholder="B001" />
+			<span style="display:block;color:#666;font-size:12px;margin-top:4px">
+				<?php esc_html_e( 'Empieza con "B" y 4 caracteres (ej. B001). Debe ser única por sede: dos tiendas no pueden compartir serie. Déjala vacía hasta activar la facturación electrónica.', 'multisede-pos' ); ?>
+			</span>
 		</p>
 
 		<p class="msp-field">
@@ -200,6 +213,48 @@ class MSP_Sedes {
 				isset( $_POST[ 'msp_' . $check ] ) ? '1' : '0'
 			);
 		}
+
+		// Serie de boleta electrónica: opcional, pero si se pone debe tener el
+		// formato de SUNAT y no chocar con la de otra sede.
+		$serie = isset( $_POST['msp_serie_boleta'] )
+			? strtoupper( sanitize_text_field( wp_unslash( $_POST['msp_serie_boleta'] ) ) )
+			: '';
+
+		if ( '' === $serie ) {
+			delete_post_meta( $post_id, MSP_Comprobante::META_SERIE );
+		} elseif ( ! MSP_Comprobante::serie_valida( $serie ) ) {
+			set_transient(
+				'msp_sede_aviso_' . $post_id,
+				__( 'La serie de boleta no se guardó: debe empezar con "B" y tener 4 caracteres (ej. B001).', 'multisede-pos' ),
+				60
+			);
+			delete_post_meta( $post_id, MSP_Comprobante::META_SERIE );
+		} elseif ( MSP_Comprobante::serie_en_uso( $serie, $post_id ) ) {
+			set_transient(
+				'msp_sede_aviso_' . $post_id,
+				/* translators: %s: serie de boleta. */
+				sprintf( __( 'La serie %s ya la usa otra sede y no se guardó: cada tienda necesita una serie distinta.', 'multisede-pos' ), $serie ),
+				60
+			);
+			delete_post_meta( $post_id, MSP_Comprobante::META_SERIE );
+		} else {
+			update_post_meta( $post_id, MSP_Comprobante::META_SERIE, $serie );
+		}
+	}
+
+	/**
+	 * Muestra el aviso si la serie de boleta se rechazó al guardar.
+	 */
+	public function mostrar_avisos() {
+		global $post;
+		if ( ! $post || self::CPT !== $post->post_type ) {
+			return;
+		}
+		$aviso = get_transient( 'msp_sede_aviso_' . $post->ID );
+		if ( $aviso ) {
+			delete_transient( 'msp_sede_aviso_' . $post->ID );
+			printf( '<div class="notice notice-error is-dismissible"><p>%s</p></div>', esc_html( $aviso ) );
+		}
 	}
 
 	/**
@@ -215,6 +270,7 @@ class MSP_Sedes {
 			if ( 'title' === $key ) {
 				$nuevas['msp_direccion'] = __( 'Dirección', 'multisede-pos' );
 				$nuevas['msp_canales']   = __( 'Canales', 'multisede-pos' );
+				$nuevas['msp_serie']     = __( 'Serie boleta', 'multisede-pos' );
 				$nuevas['msp_activa']    = __( 'Estado', 'multisede-pos' );
 			}
 		}
@@ -241,6 +297,12 @@ class MSP_Sedes {
 					$canales[] = __( 'Mostrador', 'multisede-pos' );
 				}
 				echo esc_html( $canales ? implode( ' + ', $canales ) : '—' );
+				break;
+			case 'msp_serie':
+				$serie = get_post_meta( $post_id, MSP_Comprobante::META_SERIE, true );
+				echo $serie
+					? '<code>' . esc_html( $serie ) . '</code>'
+					: '<span style="color:#999">—</span>';
 				break;
 			case 'msp_activa':
 				$activa = '1' === get_post_meta( $post_id, '_msp_activa', true );

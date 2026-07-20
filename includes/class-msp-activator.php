@@ -17,7 +17,7 @@ class MSP_Activator {
 	/**
 	 * Versión del esquema de base de datos.
 	 */
-	const DB_VERSION = '2';
+	const DB_VERSION = '3';
 
 	/**
 	 * Aplica el esquema si cambió desde la última vez.
@@ -128,8 +128,41 @@ class MSP_Activator {
 			KEY pedido_id (pedido_id)
 		) {$charset_collate};";
 
+		// Comprobantes electrónicos (boletas SUNAT). Fase 1 de facturación.
+		// El correlativo se reserva insertando una fila: el índice UNIQUE
+		// (serie, correlativo) impide repetir o saltar números aunque dos
+		// cajeros emitan a la vez. Mismo principio que descontar_si_hay del stock.
+		$sql_comprobantes = "CREATE TABLE {$prefix}msp_comprobantes (
+			id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+			pedido_id BIGINT(20) UNSIGNED NULL DEFAULT NULL,
+			sede_id BIGINT(20) UNSIGNED NOT NULL,
+			tipo VARCHAR(20) NOT NULL DEFAULT 'boleta',
+			serie VARCHAR(4) NOT NULL,
+			correlativo INT(11) UNSIGNED NOT NULL,
+			cliente_tipo_doc VARCHAR(2) NOT NULL DEFAULT '0',
+			cliente_num_doc VARCHAR(20) NOT NULL DEFAULT '',
+			cliente_nombre VARCHAR(255) NOT NULL DEFAULT '',
+			total DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+			igv DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+			estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+			intentos INT(11) NOT NULL DEFAULT 0,
+			ultimo_error TEXT NULL DEFAULT NULL,
+			hash VARCHAR(64) NOT NULL DEFAULT '',
+			xml_path VARCHAR(255) NOT NULL DEFAULT '',
+			cdr_path VARCHAR(255) NOT NULL DEFAULT '',
+			pdf_url VARCHAR(255) NOT NULL DEFAULT '',
+			emitido_at DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
+			enviado_at DATETIME NULL DEFAULT NULL,
+			PRIMARY KEY  (id),
+			UNIQUE KEY serie_correlativo (serie, correlativo),
+			KEY pedido_id (pedido_id),
+			KEY sede_id (sede_id),
+			KEY estado (estado)
+		) {$charset_collate};";
+
 		dbDelta( $sql_stock );
 		dbDelta( $sql_caja_sesiones );
 		dbDelta( $sql_caja_movimientos );
+		dbDelta( $sql_comprobantes );
 	}
 }

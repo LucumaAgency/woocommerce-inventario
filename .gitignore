@@ -14,3 +14,17 @@ Thumbs.db
 # Logs y temporales
 *.log
 *.tmp
+
+# Certificados y llaves — NUNCA subir al repo (identidad tributaria de saraih)
+*.p12
+*.pfx
+*.pem
+*.key
+*.crt
+certs/
+
+# Ojo en la Fase 2: al dejar de ignorar /vendor/ para poder committearlo (Git
+# Updater no ejecuta composer install), el certificado de prueba de Greenter
+# viaja como .pem dentro de vendor/ y la regla *.pem de arriba lo excluiría en
+# silencio, con un fallo de firma difícil de diagnosticar. Añadir entonces:
+#   !vendor/**/*.pem

@@ -48,6 +48,14 @@ class MSP_Roles {
 		// desaparecería durante esa primera carga.
 		add_action( 'init', array( __CLASS__, 'migrar_roles' ), 1 );
 
+		// WooCommerce cierra wp-admin a quien no tenga edit_posts ni
+		// manage_woocommerce, y manda a esos usuarios a "Mi cuenta" de la
+		// tienda. Pero el POS, la Caja, el Inventario y la Ayuda son pantallas
+		// del panel: sin esto, un cajero inicia sesión y aterriza en la tienda,
+		// sin acceso a ninguna herramienta de su trabajo.
+		add_filter( 'woocommerce_prevent_admin_access', array( __CLASS__, 'permitir_acceso_panel' ) );
+		add_filter( 'woocommerce_disable_admin_bar', array( __CLASS__, 'permitir_barra_admin' ) );
+
 		// Campo "Sedes asignadas" en el perfil del usuario.
 		add_action( 'show_user_profile', array( $this, 'campo_sedes_usuario' ) );
 		add_action( 'edit_user_profile', array( $this, 'campo_sedes_usuario' ) );
@@ -117,6 +125,41 @@ class MSP_Roles {
 				$admin->add_cap( $cap );
 			}
 		}
+	}
+
+	/**
+	 * ¿El usuario actual es personal de tienda del plugin?
+	 *
+	 * Se decide por capacidad y no por nombre de rol, para que siga valiendo
+	 * si un administrador arma un rol propio con estas capacidades.
+	 *
+	 * @return bool
+	 */
+	public static function es_personal_tienda() {
+		return is_user_logged_in()
+			&& ( current_user_can( 'msp_usar_pos' ) || current_user_can( 'msp_ver_stock' ) );
+	}
+
+	/**
+	 * Deja entrar al panel al personal de tienda (filtro de WooCommerce).
+	 *
+	 * @param bool $bloquear Valor que propone WooCommerce.
+	 * @return bool
+	 */
+	public static function permitir_acceso_panel( $bloquear ) {
+		return self::es_personal_tienda() ? false : $bloquear;
+	}
+
+	/**
+	 * Mantiene la barra de administración para el personal de tienda.
+	 *
+	 * Sin ella, el cajero no tiene por dónde volver al panel ni cerrar sesión.
+	 *
+	 * @param bool $ocultar Valor que propone WooCommerce.
+	 * @return bool
+	 */
+	public static function permitir_barra_admin( $ocultar ) {
+		return self::es_personal_tienda() ? false : $ocultar;
 	}
 
 	/**

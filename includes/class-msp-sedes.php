@@ -57,10 +57,19 @@ class MSP_Sedes {
 				'menu_position'       => 56,
 				'supports'            => array( 'title' ),
 				// Gestionar sedes requiere msp_gestionar_sedes (solo el admin la tiene).
+				// Ojo: aquí van SOLO capacidades primitivas. No hay que mapear
+				// 'edit_post', 'read_post' ni 'delete_post', que son META
+				// capacidades (se preguntan sobre un post concreto): al darles
+				// el mismo nombre que la primitiva, WordPress registraba
+				// 'msp_gestionar_sedes' en $post_type_meta_caps y, a partir de
+				// ahí, cualquier current_user_can('msp_gestionar_sedes') SIN
+				// post intentaba resolverla como meta cap, no encontraba el
+				// post y devolvía do_not_allow, saliendo antes de aplicar los
+				// filtros. La capacidad se envenenaba a sí misma y ni el
+				// administrador podía entrar al menú Sedes.
+				// Con map_meta_cap => true, WordPress deriva solo las meta caps
+				// a partir de estas primitivas.
 				'capabilities'        => array(
-					'edit_post'              => 'msp_gestionar_sedes',
-					'read_post'              => 'msp_gestionar_sedes',
-					'delete_post'            => 'msp_gestionar_sedes',
 					'create_posts'           => 'msp_gestionar_sedes',
 					'edit_posts'             => 'msp_gestionar_sedes',
 					'edit_others_posts'      => 'msp_gestionar_sedes',

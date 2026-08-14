@@ -105,6 +105,13 @@ class MSP_Frontend {
 
 		$id = absint( wp_unslash( $_GET['msp_sede'] ) );
 		if ( $id && self::es_sede_valida( $id ) ) {
+			// Un invitado con el carrito vacío aún no tiene cookie de sesión, y
+			// WooCommerce descarta lo que se guarde sin ella: save_data() exige
+			// has_session(). Sin esta línea, el cliente nuevo elige tienda, la
+			// página recarga y la elección se pierde; y como sin sede no puede
+			// añadir nada al carrito, la cookie no llega a crearse nunca.
+			// Punto muerto para todo el que no esté identificado.
+			WC()->session->set_customer_session_cookie( true );
 			WC()->session->set( self::SESSION_KEY, $id );
 			self::$sede_cache = $id;
 		}

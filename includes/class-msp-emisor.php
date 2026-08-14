@@ -1,0 +1,521 @@
+<?php
+/**
+ * Motor de emisión electrónica: arma, firma y envía el comprobante a SUNAT.
+ *
+ * Fase 2. Aquí NO se decide cuándo emitir (eso es Fase 3): esta clase recibe un
+ * comprobante ya reservado por MSP_Comprobante y lo lleva hasta el CDR.
+ *
+ * @package Multisede_POS
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+/**
+ * Emite comprobantes contra el web service de SUNAT usando Greenter.
+ */
+class MSP_Emisor {
+
+	/** Opción con los ajustes de facturación. */
+	const OPCION = 'msp_facturacion';
+
+	/** Carpeta de archivos dentro de uploads. */
+	const CARPETA = 'msp-comprobantes';
+
+	/**
+	 * Ajustes guardados, con sus valores por defecto.
+	 *
+	 * El entorno arranca en 'beta' a propósito: en desarrollo, un envío
+	 * accidental a producción ensucia la numeración real de saraih y eso no se
+	 * deshace.
+	 *
+	 * @return array
+	 */
+	public static function ajustes() {
+		$guardados = get_option( self::OPCION, array() );
+		if ( ! is_array( $guardados ) ) {
+			$guardados = array();
+		}
+
+		return array_merge(
+			array(
+				'entorno'       => 'beta',
+				'cert_path'     => '',
+				'sol_usuario'   => 'MODDATOS',
+				'sol_clave'     => 'moddatos',
+				'ruc'           => '20000000001',
+				'razon_social'  => 'EMPRESA DE PRUEBA',
+				'direccion'     => '',
+				'ubigeo'        => '',
+				'departamento'  => '',
+				'provincia'     => '',
+				'distrito'      => '',
+			),
+			$guardados
+		);
+	}
+
+	/**
+	 * ¿Estamos apuntando a producción?
+	 *
+	 * @return bool
+	 */
+	public static function es_produccion() {
+		$a = self::ajustes();
+		return 'produccion' === $a['entorno'];
+	}
+
+	/**
+	 * Ruta del certificado PEM.
+	 *
+	 * Orden de preferencia:
+	 * 1. La constante MSP_CERT_PATH de wp-config.php. Es la vía recomendada en
+	 *    producción: no se puede cambiar desde el panel ni viaja en los backups
+	 *    de la base de datos.
+	 * 2. El ajuste guardado.
+	 * 3. El certificado de PRUEBA que viaja con el plugin, solo si NO estamos
+	 *    en producción.
+	 *
+	 * @return string Ruta, o cadena vacía si no hay ninguna utilizable.
+	 */
+	public static function ruta_certificado() {
+		if ( defined( 'MSP_CERT_PATH' ) && MSP_CERT_PATH && file_exists( MSP_CERT_PATH ) ) {
+			return MSP_CERT_PATH;
+		}
+
+		$a = self::ajustes();
+		if ( $a['cert_path'] && file_exists( $a['cert_path'] ) ) {
+			return $a['cert_path'];
+		}
+
+		if ( ! self::es_produccion() ) {
+			$prueba = MSP_PLUGIN_DIR . 'certs-prueba/certificado-prueba.pem';
+			if ( file_exists( $prueba ) ) {
+				return $prueba;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Carpeta donde se conservan XML y CDR.
+	 *
+	 * La ley obliga a conservarlos. Se guardan en uploads con las protecciones
+	 * habituales (index.php y .htaccess), porque es la única ruta escribible
+	 * que existe seguro en cualquier hosting. Si el servidor lo permite,
+	 * conviene moverla fuera del webroot.
+	 *
+	 * @return string|WP_Error
+	 */
+	public static function carpeta_archivos() {
+		$uploads = wp_upload_dir();
+		if ( ! empty( $uploads['error'] ) ) {
+			return new WP_Error( 'msp_uploads', $uploads['error'] );
+		}
+
+		$dir = trailingslashit( $uploads['basedir'] ) . self::CARPETA;
+		if ( ! file_exists( $dir ) && ! wp_mkdir_p( $dir ) ) {
+			return new WP_Error( 'msp_mkdir', __( 'No se pudo crear la carpeta de comprobantes.', 'multisede-pos' ) );
+		}
+
+		// Que no sean listables ni descargables.
+		if ( ! file_exists( $dir . '/index.php' ) ) {
+			file_put_contents( $dir . '/index.php', "<?php\n// Silencio.\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		}
+		if ( ! file_exists( $dir . '/.htaccess' ) ) {
+			file_put_contents( $dir . '/.htaccess', "Deny from all\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		}
+
+		return $dir;
+	}
+
+	/**
+	 * Construye el cliente de Greenter listo para firmar y enviar.
+	 *
+	 * @return \Greenter\See|WP_Error
+	 */
+	public static function see() {
+		if ( ! function_exists( 'msp_facturacion_disponible' ) || ! msp_facturacion_disponible() ) {
+			return new WP_Error( 'msp_sin_greenter', __( 'El motor de facturación no está disponible: faltan las dependencias del plugin.', 'multisede-pos' ) );
+		}
+
+		$cert = self::ruta_certificado();
+		if ( ! $cert ) {
+			return new WP_Error( 'msp_sin_certificado', __( 'No hay certificado digital configurado.', 'multisede-pos' ) );
+		}
+
+		$contenido = file_get_contents( $cert ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		if ( ! $contenido ) {
+			return new WP_Error( 'msp_cert_ilegible', __( 'El certificado existe pero no se puede leer. Revisa permisos y propietario del archivo.', 'multisede-pos' ) );
+		}
+
+		$a   = self::ajustes();
+		$see = new \Greenter\See();
+		$see->setCertificate( $contenido );
+		$see->setService(
+			self::es_produccion()
+				? \Greenter\Ws\Services\SunatEndpoints::FE_PRODUCCION
+				: \Greenter\Ws\Services\SunatEndpoints::FE_BETA
+		);
+		// SUNAT espera el RUC y el usuario secundario concatenados.
+		$see->setClaveSOL( $a['ruc'], $a['sol_usuario'], $a['sol_clave'] );
+
+		return $see;
+	}
+
+	/**
+	 * Emite un comprobante ya reservado.
+	 *
+	 * @param int $comprobante_id ID en wp_msp_comprobantes.
+	 * @return array|WP_Error Fila actualizada, o WP_Error.
+	 */
+	public static function emitir( $comprobante_id ) {
+		$c = MSP_Comprobante::obtener( $comprobante_id );
+		if ( ! $c ) {
+			return new WP_Error( 'msp_no_existe', __( 'El comprobante no existe.', 'multisede-pos' ) );
+		}
+		if ( 'aceptado' === $c['estado'] ) {
+			return new WP_Error( 'msp_ya_aceptado', __( 'Ese comprobante ya fue aceptado por SUNAT.', 'multisede-pos' ) );
+		}
+
+		$see = self::see();
+		if ( is_wp_error( $see ) ) {
+			return $see;
+		}
+
+		$invoice = self::armar( $c );
+		if ( is_wp_error( $invoice ) ) {
+			return $invoice;
+		}
+
+		try {
+			$xml = $see->getXmlSigned( $invoice );
+			$res = $see->send( $invoice );
+		} catch ( \Exception $e ) {
+			MSP_Comprobante::actualizar(
+				$comprobante_id,
+				array(
+					'estado'       => 'error',
+					'ultimo_error' => substr( $e->getMessage(), 0, 1000 ),
+				)
+			);
+			return new WP_Error( 'msp_excepcion', $e->getMessage() );
+		}
+
+		$datos = array();
+
+		// Conservar el XML firmado siempre: exista o no CDR, es obligación legal.
+		$rutas = self::guardar_archivos( $c, $xml, $res->isSuccess() ? $res->getCdrZip() : null );
+		if ( ! is_wp_error( $rutas ) ) {
+			$datos['xml_path'] = $rutas['xml'];
+			if ( ! empty( $rutas['cdr'] ) ) {
+				$datos['cdr_path'] = $rutas['cdr'];
+			}
+		}
+
+		if ( ! $res->isSuccess() ) {
+			$err                   = $res->getError();
+			$datos['estado']       = 'error';
+			$datos['ultimo_error'] = sprintf( '[%s] %s', $err->getCode(), $err->getMessage() );
+			MSP_Comprobante::actualizar( $comprobante_id, $datos );
+			return new WP_Error( 'msp_envio', $datos['ultimo_error'] );
+		}
+
+		$cdr  = $res->getCdrResponse();
+		$code = (string) $cdr->getCode();
+
+		if ( '0' === $code ) {
+			$datos['estado']       = 'aceptado';
+			$datos['ultimo_error'] = '';
+		} else {
+			// Rechazo: NO se reintenta a ciegas. Casi siempre es un dato mal
+			// puesto, y el correlativo se conserva intacto (SUNAT exige
+			// numeración sin saltos). La política de reintento es Fase 3.
+			$datos['estado']       = 'rechazado';
+			$datos['ultimo_error'] = sprintf( '[%s] %s', $code, $cdr->getDescription() );
+		}
+		$datos['hash'] = substr( (string) self::hash_de_xml( $xml ), 0, 64 );
+
+		MSP_Comprobante::actualizar( $comprobante_id, $datos );
+
+		return MSP_Comprobante::obtener( $comprobante_id );
+	}
+
+	/**
+	 * Extrae el valor de la firma del XML, para el QR de la Fase 5.
+	 *
+	 * @param string $xml XML firmado.
+	 * @return string
+	 */
+	public static function hash_de_xml( $xml ) {
+		if ( ! $xml ) {
+			return '';
+		}
+		$doc = new DOMDocument();
+		libxml_use_internal_errors( true );
+		if ( ! $doc->loadXML( $xml ) ) {
+			libxml_clear_errors();
+			return '';
+		}
+		libxml_clear_errors();
+		$nodos = $doc->getElementsByTagName( 'DigestValue' );
+		return $nodos->length ? trim( $nodos->item( 0 )->nodeValue ) : '';
+	}
+
+	/**
+	 * Guarda XML y CDR en disco.
+	 *
+	 * @param array       $c   Fila del comprobante.
+	 * @param string      $xml XML firmado.
+	 * @param string|null $cdr ZIP del CDR, si lo hay.
+	 * @return array|WP_Error
+	 */
+	private static function guardar_archivos( $c, $xml, $cdr ) {
+		$dir = self::carpeta_archivos();
+		if ( is_wp_error( $dir ) ) {
+			return $dir;
+		}
+
+		$a      = self::ajustes();
+		$nombre = sprintf( '%s-03-%s-%d', $a['ruc'], $c['serie'], (int) $c['correlativo'] );
+		$rutas  = array( 'xml' => '', 'cdr' => '' );
+
+		$ruta_xml = $dir . '/' . $nombre . '.xml';
+		if ( file_put_contents( $ruta_xml, $xml ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions
+			$rutas['xml'] = $ruta_xml;
+		}
+
+		if ( $cdr ) {
+			$ruta_cdr = $dir . '/R-' . $nombre . '.zip';
+			if ( file_put_contents( $ruta_cdr, $cdr ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions
+				$rutas['cdr'] = $ruta_cdr;
+			}
+		}
+
+		return $rutas;
+	}
+
+	/**
+	 * Arma el objeto de Greenter desde la fila y su pedido.
+	 *
+	 * @param array $c Fila del comprobante.
+	 * @return \Greenter\Model\Sale\Invoice|WP_Error
+	 */
+	private static function armar( $c ) {
+		$a = self::ajustes();
+
+		$direccion = ( new \Greenter\Model\Company\Address() )
+			->setUbigueo( $a['ubigeo'] ? $a['ubigeo'] : '150101' )
+			->setDepartamento( $a['departamento'] ? $a['departamento'] : 'LIMA' )
+			->setProvincia( $a['provincia'] ? $a['provincia'] : 'LIMA' )
+			->setDistrito( $a['distrito'] ? $a['distrito'] : 'LIMA' )
+			->setDireccion( $a['direccion'] ? $a['direccion'] : '-' )
+			->setCodLocal( self::codigo_local( $c['sede_id'] ) );
+
+		$empresa = ( new \Greenter\Model\Company\Company() )
+			->setRuc( $a['ruc'] )
+			->setRazonSocial( $a['razon_social'] )
+			->setAddress( $direccion );
+
+		// Por defecto, consumidor final. La captura de DNI llega en Fase 3.
+		$cliente = ( new \Greenter\Model\Client\Client() )
+			->setTipoDoc( $c['cliente_tipo_doc'] ? $c['cliente_tipo_doc'] : '0' )
+			->setNumDoc( $c['cliente_num_doc'] ? $c['cliente_num_doc'] : '-' )
+			->setRznSocial( $c['cliente_nombre'] ? $c['cliente_nombre'] : 'CLIENTE VARIOS' );
+
+		$lineas = self::lineas( $c );
+		if ( is_wp_error( $lineas ) ) {
+			return $lineas;
+		}
+
+		$gravadas = 0;
+		$igv      = 0;
+		foreach ( $lineas as $l ) {
+			$gravadas += $l->getMtoValorVenta();
+			$igv      += $l->getIgv();
+		}
+		$gravadas = round( $gravadas, 2 );
+		$igv      = round( $igv, 2 );
+		$total    = round( $gravadas + $igv, 2 );
+
+		return ( new \Greenter\Model\Sale\Invoice() )
+			->setUblVersion( '2.1' )
+			->setTipoOperacion( '0101' )
+			->setTipoDoc( '03' )
+			->setSerie( $c['serie'] )
+			->setCorrelativo( (string) (int) $c['correlativo'] )
+			->setFechaEmision( new DateTime( 'now', new DateTimeZone( wp_timezone_string() ) ) )
+			->setTipoMoneda( 'PEN' )
+			->setCompany( $empresa )
+			->setClient( $cliente )
+			->setMtoOperGravadas( $gravadas )
+			->setMtoIGV( $igv )
+			->setTotalImpuestos( $igv )
+			->setValorVenta( $gravadas )
+			->setSubTotal( $total )
+			->setMtoImpVenta( $total )
+			->setDetails( $lineas )
+			->setLegends(
+				array(
+					( new \Greenter\Model\Sale\Legend() )
+						->setCode( '1000' )
+						->setValue( self::monto_en_letras( $total ) ),
+				)
+			);
+	}
+
+	/**
+	 * Construye las líneas del comprobante desde el pedido.
+	 *
+	 * @param array $c Fila del comprobante.
+	 * @return array|WP_Error
+	 */
+	private static function lineas( $c ) {
+		$pedido = $c['pedido_id'] ? wc_get_order( (int) $c['pedido_id'] ) : null;
+
+		// Sin pedido (emisión de prueba): una línea con el total de la fila.
+		if ( ! $pedido ) {
+			$total = (float) $c['total'];
+			if ( $total <= 0 ) {
+				return new WP_Error( 'msp_sin_lineas', __( 'El comprobante no tiene pedido ni total con el que armar la boleta.', 'multisede-pos' ) );
+			}
+			return array( self::linea( 'PRUEBA', __( 'Producto de prueba', 'multisede-pos' ), 1, $total ) );
+		}
+
+		$lineas = array();
+		foreach ( $pedido->get_items() as $item ) {
+			$cantidad = (int) $item->get_quantity();
+			if ( $cantidad < 1 ) {
+				continue;
+			}
+			$producto = $item->get_product();
+			$sku      = $producto ? $producto->get_sku() : '';
+			// El total de la línea YA incluye IGV: los precios de la tienda son
+			// con impuesto incluido.
+			$total_linea = (float) $item->get_total() + (float) $item->get_total_tax();
+			$lineas[]    = self::linea(
+				$sku ? $sku : (string) $item->get_product_id(),
+				$item->get_name(),
+				$cantidad,
+				$total_linea
+			);
+		}
+
+		if ( ! $lineas ) {
+			return new WP_Error( 'msp_pedido_vacio', __( 'El pedido no tiene líneas que facturar.', 'multisede-pos' ) );
+		}
+
+		return $lineas;
+	}
+
+	/**
+	 * Crea una línea a partir de su total CON IGV.
+	 *
+	 * El IGV se calcula como (total − base) y no como (base × 0.18). Con la
+	 * segunda fórmula, precios enteros como 6, 10 o 15 soles descuadran un
+	 * céntimo al redondear, y SUNAT rechaza el comprobante por ello: pasa en 9
+	 * de los 44 precios del catálogo de saraih.
+	 *
+	 * @param string $codigo      Código o SKU.
+	 * @param string $descripcion Descripción.
+	 * @param int    $cantidad    Unidades.
+	 * @param float  $total_linea Total de la línea CON IGV.
+	 * @return \Greenter\Model\Sale\SaleDetail
+	 */
+	private static function linea( $codigo, $descripcion, $cantidad, $total_linea ) {
+		$total_linea = round( (float) $total_linea, 2 );
+		$base        = round( $total_linea / 1.18, 2 );
+		$igv         = round( $total_linea - $base, 2 );
+		$unitario    = $cantidad > 0 ? round( $base / $cantidad, 10 ) : $base;
+
+		return ( new \Greenter\Model\Sale\SaleDetail() )
+			->setCodProducto( substr( (string) $codigo, 0, 30 ) )
+			->setUnidad( 'NIU' )
+			->setCantidad( $cantidad )
+			->setDescripcion( substr( wp_strip_all_tags( (string) $descripcion ), 0, 250 ) )
+			->setMtoBaseIgv( $base )
+			->setPorcentajeIgv( 18 )
+			->setIgv( $igv )
+			->setTipAfeIgv( '10' )
+			->setTotalImpuestos( $igv )
+			->setMtoValorVenta( $base )
+			->setMtoValorUnitario( $unitario )
+			->setMtoPrecioUnitario( $cantidad > 0 ? round( $total_linea / $cantidad, 10 ) : $total_linea );
+	}
+
+	/**
+	 * Código de establecimiento anexo de la sede.
+	 *
+	 * @param int $sede_id Sede.
+	 * @return string
+	 */
+	public static function codigo_local( $sede_id ) {
+		$codigo = get_post_meta( (int) $sede_id, '_msp_codigo_anexo', true );
+		return $codigo ? substr( sanitize_text_field( $codigo ), 0, 4 ) : '0000';
+	}
+
+	/**
+	 * Monto en letras para la leyenda obligatoria.
+	 *
+	 * @param float $monto Monto.
+	 * @return string
+	 */
+	public static function monto_en_letras( $monto ) {
+		$entero   = (int) floor( $monto );
+		$centimos = (int) round( ( $monto - $entero ) * 100 );
+		return sprintf( '%s CON %02d/100 SOLES', self::numero_a_letras( $entero ), $centimos );
+	}
+
+	/**
+	 * Convierte un entero a letras (hasta millones), en mayúsculas.
+	 *
+	 * @param int $n Número.
+	 * @return string
+	 */
+	private static function numero_a_letras( $n ) {
+		$n = (int) $n;
+		if ( 0 === $n ) {
+			return 'CERO';
+		}
+		if ( $n < 0 ) {
+			return 'MENOS ' . self::numero_a_letras( abs( $n ) );
+		}
+
+		$unidades = array( '', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE', 'DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE', 'VEINTE' );
+		$decenas  = array( 3 => 'TREINTA', 4 => 'CUARENTA', 5 => 'CINCUENTA', 6 => 'SESENTA', 7 => 'SETENTA', 8 => 'OCHENTA', 9 => 'NOVENTA' );
+		$centenas = array( 1 => 'CIENTO', 2 => 'DOSCIENTOS', 3 => 'TRESCIENTOS', 4 => 'CUATROCIENTOS', 5 => 'QUINIENTOS', 6 => 'SEISCIENTOS', 7 => 'SETECIENTOS', 8 => 'OCHOCIENTOS', 9 => 'NOVECIENTOS' );
+
+		if ( $n <= 20 ) {
+			return $unidades[ $n ];
+		}
+		if ( $n < 30 ) {
+			return 'VEINTI' . $unidades[ $n - 20 ];
+		}
+		if ( $n < 100 ) {
+			$d = (int) floor( $n / 10 );
+			$u = $n % 10;
+			return $decenas[ $d ] . ( $u ? ' Y ' . $unidades[ $u ] : '' );
+		}
+		if ( 100 === $n ) {
+			return 'CIEN';
+		}
+		if ( $n < 1000 ) {
+			$c    = (int) floor( $n / 100 );
+			$rest = $n % 100;
+			return $centenas[ $c ] . ( $rest ? ' ' . self::numero_a_letras( $rest ) : '' );
+		}
+		if ( $n < 1000000 ) {
+			$miles = (int) floor( $n / 1000 );
+			$rest  = $n % 1000;
+			$pref  = 1 === $miles ? 'MIL' : self::numero_a_letras( $miles ) . ' MIL';
+			return $pref . ( $rest ? ' ' . self::numero_a_letras( $rest ) : '' );
+		}
+
+		$millones = (int) floor( $n / 1000000 );
+		$rest     = $n % 1000000;
+		$pref     = 1 === $millones ? 'UN MILLON' : self::numero_a_letras( $millones ) . ' MILLONES';
+		return $pref . ( $rest ? ' ' . self::numero_a_letras( $rest ) : '' );
+	}
+}

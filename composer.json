@@ -1,0 +1,17 @@
+{
+    "name": "lucuma/multisede-pos",
+    "description": "Emision de comprobantes electronicos para Multisede POS",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=7.4",
+        "greenter/lite": "5.1.1"
+    },
+    "config": {
+        "platform": {
+            "php": "8.1.0"
+        },
+        "optimize-autoloader": true,
+        "platform-check": false
+    }
+}

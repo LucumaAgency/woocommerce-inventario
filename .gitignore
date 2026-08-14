@@ -1,5 +1,6 @@
 # Dependencias
-/vendor/
+# OJO: vendor/ SI se committea. Git Updater no ejecuta composer install, asi que
+# las dependencias tienen que viajar con el codigo.
 /node_modules/
 
 # Sistema
@@ -22,6 +23,10 @@ Thumbs.db
 *.key
 *.crt
 certs/
+
+# Excepcion: el certificado de PRUEBA de Greenter si va al repo (es publico y
+# autofirmado, y hace falta para el sandbox). Los reales siguen excluidos.
+!certs-prueba/*.pem
 
 # Ojo en la Fase 2: al dejar de ignorar /vendor/ para poder committearlo (Git
 # Updater no ejecuta composer install), el certificado de prueba de Greenter

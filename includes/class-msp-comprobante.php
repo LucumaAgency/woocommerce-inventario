@@ -183,6 +183,38 @@ class MSP_Comprobante {
 	}
 
 	/**
+	 * Actualiza campos de un comprobante ya reservado.
+	 *
+	 * Solo se permiten los campos del resultado de la emisión: la serie y el
+	 * correlativo NO se tocan nunca desde aquí. SUNAT exige numeración sin
+	 * saltos, así que un número reservado se conserva aunque el envío falle.
+	 *
+	 * @param int   $id    ID del comprobante.
+	 * @param array $datos Campos a actualizar.
+	 * @return bool
+	 */
+	public static function actualizar( $id, $datos ) {
+		global $wpdb;
+
+		$permitidos = array( 'estado', 'ultimo_error', 'hash', 'xml_path', 'cdr_path' );
+		$campos     = array();
+		$formatos   = array();
+
+		foreach ( $permitidos as $campo ) {
+			if ( array_key_exists( $campo, $datos ) ) {
+				$campos[ $campo ] = is_string( $datos[ $campo ] ) ? $datos[ $campo ] : (string) $datos[ $campo ];
+				$formatos[]       = '%s';
+			}
+		}
+
+		if ( ! $campos ) {
+			return false;
+		}
+
+		return (bool) $wpdb->update( self::tabla(), $campos, array( 'id' => (int) $id ), $formatos, array( '%d' ) );
+	}
+
+	/**
 	 * Obtiene un comprobante por su ID.
 	 *
 	 * @param int $id ID del comprobante.

@@ -687,8 +687,17 @@ class MSP_Caja {
 				$concepto = isset( $_POST['concepto'] ) ? sanitize_text_field( wp_unslash( $_POST['concepto'] ) ) : '';
 				$monto    = isset( $_POST['monto'] ) ? (float) wp_unslash( $_POST['monto'] ) : 0;
 				if ( $monto > 0 ) {
-					self::agregar_movimiento( $sesion->id, $tipo, $concepto, $monto );
-					$aviso = 'movimiento';
+					// Del cajón no se puede sacar más de lo que hay. Un
+					// esperado negativo no es un caso raro válido: siempre es
+					// un error de registro (monto mal escrito, o falta anotar
+					// un ingreso). Se corrige ahora, no en el cuadre del cierre
+					// cuando ya nadie recuerda qué pasó.
+					if ( 'egreso' === $tipo && $monto > self::esperado( $sesion ) ) {
+						$aviso = 'egreso_excede';
+					} else {
+						self::agregar_movimiento( $sesion->id, $tipo, $concepto, $monto );
+						$aviso = 'movimiento';
+					}
 				}
 			}
 		} elseif ( 'cerrar_caja' === $accion ) {
@@ -770,6 +779,7 @@ class MSP_Caja {
 			'ya_abierta' => array( 'warning', __( 'Ya tienes una caja abierta en esta sede.', 'multisede-pos' ) ),
 			'movimiento' => array( 'success', __( 'Movimiento registrado.', 'multisede-pos' ) ),
 			'cerrada'    => array( 'success', __( 'Caja cerrada. Revisa el cuadre abajo.', 'multisede-pos' ) ),
+			'egreso_excede' => array( 'error', __( 'No se registró: el egreso es mayor que el efectivo que hay en el cajón. Revisa el monto, o registra primero el ingreso que falte.', 'multisede-pos' ) ),
 		);
 		if ( isset( $mensajes[ $aviso ] ) ) {
 			printf(

@@ -76,6 +76,15 @@ class MSP_Roles {
 	 */
 	public static function migrar_roles() {
 		if ( get_option( 'msp_roles_version' ) === self::ROLES_VERSION ) {
+			// Aunque la versión coincida, el administrador puede haberse
+			// quedado sin las capacidades del plugin (otro plugin que recrea
+			// roles, una restauración parcial, una limpieza de la BD). Como el
+			// menú Sedes las exige, eso deja al dueño del sitio fuera de su
+			// propia pantalla y sin forma de recuperarse: la migración por
+			// versión ya no vuelve a correr. Se comprueba y se repara.
+			if ( is_admin() && ! wp_doing_ajax() ) {
+				self::asegurar_caps_admin();
+			}
 			return;
 		}
 
@@ -122,6 +131,23 @@ class MSP_Roles {
 		$admin = get_role( 'administrator' );
 		if ( $admin ) {
 			foreach ( self::capacidades() as $cap ) {
+				$admin->add_cap( $cap );
+			}
+		}
+	}
+
+	/**
+	 * Devuelve al administrador las capacidades del plugin que le falten.
+	 *
+	 * Barato: solo escribe si detecta alguna ausente.
+	 */
+	public static function asegurar_caps_admin() {
+		$admin = get_role( 'administrator' );
+		if ( ! $admin ) {
+			return;
+		}
+		foreach ( self::capacidades() as $cap ) {
+			if ( ! $admin->has_cap( $cap ) ) {
 				$admin->add_cap( $cap );
 			}
 		}

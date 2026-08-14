@@ -110,6 +110,8 @@ require_once MSP_PLUGIN_DIR . 'includes/class-msp-frontend.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-pos.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-caja.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-comprobante.php';
+require_once MSP_PLUGIN_DIR . 'includes/class-msp-emisor.php';
+require_once MSP_PLUGIN_DIR . 'includes/class-msp-facturacion.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-inventario.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-wizard.php';
 require_once MSP_PLUGIN_DIR . 'includes/class-msp-ayuda.php';

@@ -62,6 +62,9 @@ class MSP_Plugin {
 
 			$ayuda = new MSP_Ayuda();
 			$ayuda->init();
+
+			$facturacion = new MSP_Facturacion();
+			$facturacion->init();
 		}
 	}
 

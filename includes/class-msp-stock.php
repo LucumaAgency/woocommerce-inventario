@@ -387,8 +387,19 @@ class MSP_Stock {
 		}
 
 		// Activamos la gestión de stock y reflejamos el disponible.
-		update_post_meta( $producto_id, '_manage_stock', 'yes' );
-		wc_update_product_stock( $product, $disponible, 'set' );
+		//
+		// Ojo: no vale escribir '_manage_stock' con update_post_meta y llamar
+		// después a wc_update_product_stock(). Esa función empieza con
+		// `if ( ! is_null( $qty ) && $product->managing_stock() )`, y el objeto
+		// $product ya está cargado en memoria sin esa marca: en un producto
+		// nuevo la escritura se descarta EN SILENCIO. El resultado era
+		// `_manage_stock = yes` con `_stock = NULL`, y como WooCommerce compara
+		// `get_stock_quantity() < requerido`, NULL siempre pierde: el producto
+		// no se podía vender por la web nunca más.
+		$product->set_manage_stock( true );
+		$product->set_stock_quantity( $disponible );
+		$product->set_stock_status( $disponible > 0 ? 'instock' : 'outofstock' );
+		$product->save();
 	}
 
 	/**

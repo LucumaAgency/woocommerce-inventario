@@ -52,8 +52,17 @@ class MSP_Plugin {
 		$caja = new MSP_Caja();
 		$caja->init();
 
+		// Cola de emisión electrónica (Fase 3). Fuera del bloque de admin a
+		// propósito: la venta del POS llega por AJAX y el trabajo de fondo por
+		// cron, y ninguno de los dos es una pantalla del panel.
+		$cola = new MSP_Cola();
+		$cola->init();
+
 		// Pantallas de solo-admin: inventario, asistente y ayuda.
 		if ( is_admin() ) {
+			$comprobantes = new MSP_Comprobantes();
+			$comprobantes->init();
+
 			$inventario = new MSP_Inventario();
 			$inventario->init();
 

@@ -64,6 +64,8 @@ class MSP_Facturacion {
 			// El interruptor solo acepta dos valores: cualquier cosa rara vuelve
 			// a beta. Un envío accidental a producción no se deshace.
 			$nuevos['entorno'] = 'produccion' === $nuevos['entorno'] ? 'produccion' : 'beta';
+
+			$nuevos['emision_automatica'] = ! empty( $_POST['emision_automatica'] ) ? 1 : 0;
 			update_option( self::opcion(), $nuevos );
 			$aviso = 'guardado';
 
@@ -226,6 +228,21 @@ class MSP_Facturacion {
 								<option value="beta" <?php selected( $a['entorno'], 'beta' ); ?>><?php esc_html_e( 'Beta (pruebas)', 'multisede-pos' ); ?></option>
 								<option value="produccion" <?php selected( $a['entorno'], 'produccion' ); ?>><?php esc_html_e( 'Producción', 'multisede-pos' ); ?></option>
 							</select>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Emisión automática', 'multisede-pos' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="emision_automatica" value="1" <?php checked( ! empty( $a['emision_automatica'] ) ); ?> />
+								<?php esc_html_e( 'Emitir boleta de cada venta del POS y de cada pedido web al recogerlo', 'multisede-pos' ); ?>
+							</label>
+							<p class="description">
+								<?php esc_html_e( 'La emisión ocurre en segundo plano: el cobro no espera a SUNAT. Con esto apagado el POS vende igual, pero no genera comprobantes.', 'multisede-pos' ); ?>
+								<?php if ( ! empty( $a['emision_automatica'] ) && MSP_Emisor::es_produccion() ) : ?>
+									<br><strong><?php esc_html_e( 'Encendida y en producción: cada venta consume numeración real.', 'multisede-pos' ); ?></strong>
+								<?php endif; ?>
+							</p>
 						</td>
 					</tr>
 					<tr>

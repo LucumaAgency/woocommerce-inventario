@@ -41,6 +41,9 @@ class MSP_Emisor {
 		return array_merge(
 			array(
 				'entorno'       => 'beta',
+				// Apagada por defecto: encender esto hace que cada venta real
+				// consuma numeración. Es una decisión, no un valor por defecto.
+				'emision_automatica' => 0,
 				'cert_path'     => '',
 				'sol_usuario'   => 'MODDATOS',
 				'sol_clave'     => 'moddatos',

@@ -17,7 +17,7 @@ class MSP_Activator {
 	/**
 	 * Versión del esquema de base de datos.
 	 */
-	const DB_VERSION = '3';
+	const DB_VERSION = '4';
 
 	/**
 	 * Aplica el esquema si cambió desde la última vez.
@@ -148,6 +148,8 @@ class MSP_Activator {
 			intentos INT(11) NOT NULL DEFAULT 0,
 			ultimo_error TEXT NULL DEFAULT NULL,
 			hash VARCHAR(64) NOT NULL DEFAULT '',
+			proximo_intento DATETIME NULL DEFAULT NULL,
+			alertado_at DATETIME NULL DEFAULT NULL,
 			xml_path VARCHAR(255) NOT NULL DEFAULT '',
 			cdr_path VARCHAR(255) NOT NULL DEFAULT '',
 			pdf_url VARCHAR(255) NOT NULL DEFAULT '',
@@ -157,7 +159,8 @@ class MSP_Activator {
 			UNIQUE KEY serie_correlativo (serie, correlativo),
 			KEY pedido_id (pedido_id),
 			KEY sede_id (sede_id),
-			KEY estado (estado)
+			KEY estado (estado),
+			KEY proximo_intento (proximo_intento)
 		) {$charset_collate};";
 
 		dbDelta( $sql_stock );

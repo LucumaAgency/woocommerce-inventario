@@ -296,7 +296,30 @@ Capa que emitirá los comprobantes electrónicos SUNAT. El POS y la web **no hab
 - `reservar( $datos )` — reserva atómica del siguiente correlativo y crea el comprobante. Devuelve la fila o un `WP_Error`.
 - `obtener()`, `obtener_por_pedido()`, `numero()` — lectura y número legible (`B001-00000042`).
 
-**Roadmap de facturación** (plan completo: `PLAN-BOLETAS.md` en la carpeta del cliente): F1 base ✓ · F2 Greenter + emisión · F3 cola/reintentos/pantalla Comprobantes · F4 anulaciones (resumen diario) · F5 ticket con QR + PDF.
+- `listar()`, `contar_por_estado()`, `pendientes_de_reintento()`, `atascados()` — consultas que alimentan la pantalla de Comprobantes y la cola (v1.9.0).
+- `LIMITE_DNI` (700) — importe a partir del cual SUNAT exige identificar al comprador. Es constante y no ajuste: es la norma, no una preferencia de la tienda.
+
+### MSP_Emisor (Fase 2 de boletas — v1.8.0)
+Motor de emisión: arma el XML UBL con **Greenter**, lo firma con el certificado PEM y lo envía por SOAP al web service de SUNAT. Recibe un comprobante ya reservado y lo lleva hasta el CDR; **no decide cuándo emitir** (eso es la cola).
+
+- `emitir( $comprobante_id )` — firma, envía, guarda XML y CDR, y deja el comprobante en `aceptado`, `rechazado` o `error`.
+- `ajustes()` / `es_produccion()` — opción `msp_facturacion`: entorno, credenciales SOL, datos del emisor y el interruptor `emision_automatica`.
+- `codigo_local( $sede_id )` — código de establecimiento del meta `_msp_codigo_anexo` de la sede, o **`0000`** (domicilio fiscal) si no tiene. saraih emite con `0000`: decidió no declarar sus tiendas como anexos.
+
+### MSP_Cola (Fase 3 de boletas — v1.9.0)
+Decide **cuándo** se emite. Regla del módulo: **la emisión nunca ocurre dentro del cobro**. El cajero cierra la venta contra la caja, no contra SUNAT; si el web service tarda o está caído, es problema de la cola.
+
+- `al_vender_en_pos()` — engancha `msp_pos_venta_creada`: reserva el correlativo (local y rápido) y programa el envío.
+- `encolar_pedido( $order, $sede_id )` — idempotente: si el pedido ya tiene comprobante no reserva otro. Un segundo comprobante por la misma venta sería un duplicado ante SUNAT.
+- `procesar( $id )` — emite y decide: aceptado → fin; **rechazado → no se reintenta solo** (un rechazo es un dato mal puesto, reintentarlo da el mismo rechazo); error pasajero → reintento con espera creciente (2 min, 10 min, 30 min, 1 h, 3 h, 6 h, 12 h, 24 h).
+- `barrido()` — cada hora: rescata lo que se quedó sin acción programada (red de seguridad si Action Scheduler pierde una acción) y dispara la alarma.
+- `alarma()` — correo al administrador por los comprobantes sin aceptar tras **2 días**. Una sola vez por comprobante (`alertado_at`): un recordatorio diario acaba en spam.
+- Usa **Action Scheduler** (viene con WooCommerce) y cae a WP-Cron si no está. La diferencia importa: WP-Cron depende de visitas, y una tienda cerrada de noche no las tiene.
+
+### MSP_Comprobantes (pantalla, v1.9.0)
+`Caja → Comprobantes`, con capacidad `msp_ver_reportes`. Listado con filtros por estado, tienda y número; reintento manual; descarga del XML firmado y del CDR (servidos desde PHP, con la ruta anclada a la carpeta del módulo). Sin esta pantalla la cola sería una caja negra.
+
+**Roadmap de facturación** (plan completo: `PLAN-BOLETAS.md` en la carpeta del cliente): F1 base ✓ · F2 Greenter + emisión ✓ · F3 cola/reintentos/pantalla Comprobantes ✓ · F4 anulaciones (resumen diario) · F5 ticket con QR + PDF.
 
 ---
 
@@ -349,7 +372,12 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 
 ### Hooks (actions)
 - `msp_pos_venta_creada( $order, $metodo, $sede_id )` — se dispara al crear una venta en el POS. Lo usa la caja chica para registrar el efectivo; se puede usar para integraciones (facturación, etc.).
-- `msp_pos_venta_anulada( $order, $sede_id )` — se dispara al cancelar o reembolsar una venta del POS, después de devolver el stock a la sede. Lo usa la caja chica para revertir el efectivo.
+- `msp_pos_venta_anulada( $order, $sede_id )` — se dispara al cancelar o reembolsar una venta del POS, después de devolver el stock a la sede. Lo usa la caja chica para revertir el efectivo. **Será el enganche de la Fase 4** (resumen diario de anulaciones a SUNAT).
+- `msp_emitir_comprobante( $comprobante_id )` — acción de fondo que emite un comprobante (Action Scheduler, grupo `multisede-pos`).
+- `msp_barrido_comprobantes()` — barrido horario: reintentos pendientes + alarma.
+
+### Filtros propios
+- `msp_alarma_destinatario` — correo al que va el aviso de comprobantes atascados (por defecto, el del administrador del sitio).
 
 ### Filtros de WooCommerce intervenidos
 - `woocommerce_can_reduce_order_stock` — desactiva la reducción automática en pedidos con sede.
@@ -375,6 +403,9 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.5.0** | Lenguaje de tienda: "arqueo" → "cuadre", y el resultado del cierre se dice en claro (cuadró / faltaron / sobraron) |
 | **1.6.0** | Tabla "Ventas de este turno" en la pantalla de Caja |
 | **1.7.0** | **Boletas Fase 1** — tabla `wp_msp_comprobantes`, reserva de correlativo a prueba de carreras, serie de boleta por sede (`_msp_serie_boleta`). Base de facturación electrónica; aún no emite |
+| **1.7.1 – 1.7.5** | Correcciones del recorrido de verificación: acceso del personal de tienda al panel, stock que no llegaba a Woo, egresos mayores que el efectivo del cajón, recuperación de capacidades del admin y menú Sedes |
+| **1.8.0** | **Boletas Fase 2** — motor de emisión con Greenter: XML UBL, firma, envío SOAP a SUNAT, CDR y conservación de archivos. Pantalla de Facturación con emisión de prueba |
+| **1.9.0** | **Boletas Fase 3** — cola de emisión en segundo plano (Action Scheduler) con reintentos de espera creciente, alarma por correo a los 2 días, pantalla **Comprobantes** y captura de **DNI** en POS y checkout (obligatoria sobre S/ 700). Esquema **DB_VERSION 4** (`proximo_intento`, `alertado_at`) |
 
 ---
 

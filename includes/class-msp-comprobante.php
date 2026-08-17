@@ -30,6 +30,15 @@ class MSP_Comprobante {
 	const MAX_REINTENTOS_RESERVA = 25;
 
 	/**
+	 * Importe a partir del cual SUNAT exige identificar al comprador.
+	 *
+	 * Regla de boletas: por encima de S/ 700 hay que consignar el tipo y número
+	 * de documento del cliente. Es una constante y no un ajuste porque no es
+	 * una preferencia de la tienda: es la norma.
+	 */
+	const LIMITE_DNI = 700;
+
+	/**
 	 * Nombre de la tabla.
 	 *
 	 * @return string
@@ -207,6 +216,22 @@ class MSP_Comprobante {
 			}
 		}
 
+		// Campos de la cola (Fase 3). Van aparte porque admiten NULL: una fecha
+		// de próximo intento vacía significa "no hay reintento programado", y
+		// convertirla a cadena la guardaría como '0000-00-00', que sí entraría
+		// en la consulta de pendientes y reintentaría para siempre.
+		foreach ( array( 'proximo_intento', 'alertado_at', 'enviado_at' ) as $campo ) {
+			if ( array_key_exists( $campo, $datos ) ) {
+				$campos[ $campo ] = $datos[ $campo ] ? $datos[ $campo ] : null;
+				$formatos[]       = '%s';
+			}
+		}
+
+		if ( array_key_exists( 'intentos', $datos ) ) {
+			$campos['intentos'] = (int) $datos['intentos'];
+			$formatos[]         = '%d';
+		}
+
 		if ( ! $campos ) {
 			return false;
 		}
@@ -245,6 +270,151 @@ class MSP_Comprobante {
 			$wpdb->prepare(
 				"SELECT * FROM {$tabla} WHERE pedido_id = %d ORDER BY id DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				(int) $pedido_id
+			),
+			ARRAY_A
+		);
+	}
+
+	/**
+	 * Lista comprobantes para la pantalla de gerencia, con filtros y paginación.
+	 *
+	 * @param array $args {
+	 *     @type string $estado   Filtro por estado ('' = todos).
+	 *     @type int    $sede_id  Filtro por sede (0 = todas).
+	 *     @type string $buscar   Serie-correlativo o número de pedido.
+	 *     @type int    $por_pag  Filas por página.
+	 *     @type int    $pagina   Página (1 en adelante).
+	 * }
+	 * @return array {
+	 *     @type array $filas Filas encontradas.
+	 *     @type int   $total Total de filas que cumplen el filtro.
+	 * }
+	 */
+	public static function listar( $args = array() ) {
+		global $wpdb;
+
+		$args = wp_parse_args(
+			$args,
+			array(
+				'estado'  => '',
+				'sede_id' => 0,
+				'buscar'  => '',
+				'por_pag' => 30,
+				'pagina'  => 1,
+			)
+		);
+
+		$tabla  = self::tabla();
+		$where  = array( '1=1' );
+		$params = array();
+
+		if ( $args['estado'] ) {
+			$where[]  = 'estado = %s';
+			$params[] = sanitize_key( $args['estado'] );
+		}
+		if ( $args['sede_id'] ) {
+			$where[]  = 'sede_id = %d';
+			$params[] = (int) $args['sede_id'];
+		}
+		if ( '' !== trim( (string) $args['buscar'] ) ) {
+			$buscar   = trim( (string) $args['buscar'] );
+			$where[]  = '( CONCAT(serie, "-", LPAD(correlativo, 8, "0")) LIKE %s OR pedido_id = %d )';
+			$params[] = '%' . $wpdb->esc_like( strtoupper( $buscar ) ) . '%';
+			$params[] = (int) preg_replace( '/[^0-9]/', '', $buscar );
+		}
+
+		$sql_where = implode( ' AND ', $where );
+
+		$total = (int) $wpdb->get_var(
+			$params
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+				? $wpdb->prepare( "SELECT COUNT(*) FROM {$tabla} WHERE {$sql_where}", $params )
+				: "SELECT COUNT(*) FROM {$tabla}" // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		);
+
+		$por_pag = max( 1, (int) $args['por_pag'] );
+		$offset  = max( 0, ( (int) $args['pagina'] - 1 ) * $por_pag );
+
+		$filas = $wpdb->get_results(
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+			$wpdb->prepare(
+				"SELECT * FROM {$tabla} WHERE {$sql_where} ORDER BY id DESC LIMIT %d OFFSET %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				array_merge( $params, array( $por_pag, $offset ) )
+			),
+			ARRAY_A
+		);
+
+		return array(
+			'filas' => $filas ? $filas : array(),
+			'total' => $total,
+		);
+	}
+
+	/**
+	 * Cuenta comprobantes por estado, para el resumen de la pantalla.
+	 *
+	 * @return array Mapa estado => cantidad.
+	 */
+	public static function contar_por_estado() {
+		global $wpdb;
+		$tabla = self::tabla();
+
+		$filas = $wpdb->get_results(
+			"SELECT estado, COUNT(*) AS n FROM {$tabla} GROUP BY estado", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			ARRAY_A
+		);
+
+		$out = array();
+		foreach ( (array) $filas as $f ) {
+			$out[ $f['estado'] ] = (int) $f['n'];
+		}
+		return $out;
+	}
+
+	/**
+	 * Comprobantes que tocan reintentar ahora.
+	 *
+	 * @param int $limite Máximo de filas.
+	 * @return array
+	 */
+	public static function pendientes_de_reintento( $limite = 20 ) {
+		global $wpdb;
+		$tabla = self::tabla();
+
+		return (array) $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM {$tabla}
+				 WHERE estado IN ('pendiente','error')
+				   AND proximo_intento IS NOT NULL
+				   AND proximo_intento <= %s
+				 ORDER BY proximo_intento ASC
+				 LIMIT %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				current_time( 'mysql' ),
+				(int) $limite
+			),
+			ARRAY_A
+		);
+	}
+
+	/**
+	 * Comprobantes atascados desde hace más de N días y todavía sin avisar.
+	 *
+	 * @param int $dias Antigüedad mínima en días.
+	 * @return array
+	 */
+	public static function atascados( $dias = 2 ) {
+		global $wpdb;
+		$tabla  = self::tabla();
+		$limite = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - ( (int) $dias * DAY_IN_SECONDS ) );
+
+		return (array) $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM {$tabla}
+				 WHERE estado IN ('pendiente','error','rechazado')
+				   AND emitido_at <= %s
+				   AND alertado_at IS NULL
+				 ORDER BY emitido_at ASC", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$limite
 			),
 			ARRAY_A
 		);

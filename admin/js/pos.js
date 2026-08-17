@@ -49,6 +49,9 @@
 		} );
 
 		$( '#msp-pos-total' ).text( fmt( totalTicket() ) );
+		if ( typeof avisarDni === 'function' ) {
+			avisarDni();
+		}
 		calcularVuelto();
 	}
 
@@ -149,12 +152,46 @@
 
 	$( '#msp-pos-metodo, #msp-pos-recibido' ).on( 'change keyup', calcularVuelto );
 
+	// DNI: solo dígitos, y aviso en cuanto el ticket pasa del límite. El aviso
+	// aquí es cortesía para que el cajero lo pida a tiempo; quien realmente
+	// impide el cobro es el servidor.
+	function dniValor() {
+		return ( $( '#msp-pos-dni' ).val() || '' ).replace( /[^0-9]/g, '' );
+	}
+
+	function avisarDni() {
+		if ( ! mspPOS.boletas ) {
+			return;
+		}
+		var $aviso = $( '#msp-pos-dni-aviso' );
+		if ( totalTicket() > mspPOS.limiteDni && dniValor().length !== 8 ) {
+			$aviso.text( mspPOS.i18n.dni_requerido ).css( 'color', '#b32d2e' );
+		} else {
+			$aviso.text( '' );
+		}
+	}
+
+	$( '#msp-pos-dni' ).on( 'input', function () {
+		this.value = this.value.replace( /[^0-9]/g, '' ).slice( 0, 8 );
+		avisarDni();
+	} );
+
 	// Cobrar.
 	$( '#msp-pos-cobrar' ).on( 'click', function () {
 		var $msg = $( '#msp-pos-mensaje' ).empty();
 		var ids = Object.keys( ticket );
 		if ( ! ids.length ) {
 			$msg.html( '<span class="err">' + mspPOS.i18n.vacio + '</span>' );
+			return;
+		}
+		var dni = dniValor();
+		if ( mspPOS.boletas && dni && dni.length !== 8 ) {
+			$msg.html( '<span class="err">' + mspPOS.i18n.dni_corto + '</span>' );
+			return;
+		}
+		if ( mspPOS.boletas && ! dni && totalTicket() > mspPOS.limiteDni ) {
+			$msg.html( '<span class="err">' + mspPOS.i18n.dni_requerido + '</span>' );
+			$( '#msp-pos-dni' ).trigger( 'focus' );
 			return;
 		}
 		if ( ! window.confirm( mspPOS.i18n.confirmar ) ) {
@@ -174,6 +211,8 @@
 				nonce: mspPOS.nonce,
 				sede: $( '#msp-pos-sede' ).val(),
 				metodo: $( '#msp-pos-metodo' ).val(),
+				dni: dni,
+				cliente_nombre: $( '#msp-pos-cliente-nombre' ).val() || '',
 				items: JSON.stringify( items )
 			}
 		).done( function ( resp ) {
@@ -182,6 +221,9 @@
 				ticket = {};
 				pintarTicket();
 				$( '#msp-pos-recibido' ).val( '' );
+				$( '#msp-pos-dni' ).val( '' );
+				$( '#msp-pos-cliente-nombre' ).val( '' );
+				$( '#msp-pos-dni-aviso' ).text( '' );
 				$( '#msp-pos-buscar' ).val( '' );
 				$( '#msp-pos-resultados' ).empty();
 			} else {

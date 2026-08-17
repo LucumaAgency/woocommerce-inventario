@@ -113,6 +113,8 @@ class MSP_POS {
 				'nonce'    => wp_create_nonce( 'msp_pos' ),
 				'simbolo'  => get_woocommerce_currency_symbol(),
 				'decimals' => wc_get_price_decimals(),
+				'boletas'  => MSP_Cola::activa(),
+				'limiteDni' => MSP_Comprobante::LIMITE_DNI,
 				'i18n'     => array(
 					'sin_resultados' => __( 'Sin resultados', 'multisede-pos' ),
 					'sin_stock'      => __( 'Sin stock', 'multisede-pos' ),
@@ -120,6 +122,12 @@ class MSP_POS {
 					'vacio'          => __( 'Agrega productos al ticket.', 'multisede-pos' ),
 					'error'          => __( 'Ocurrió un error. Inténtalo de nuevo.', 'multisede-pos' ),
 					'vuelto'         => __( 'Vuelto', 'multisede-pos' ),
+					'dni_requerido'  => sprintf(
+						/* translators: %s: importe límite. */
+						__( 'Esta venta pasa de S/ %s: la boleta necesita el DNI del cliente.', 'multisede-pos' ),
+						number_format( MSP_Comprobante::LIMITE_DNI, 2 )
+					),
+					'dni_corto'      => __( 'El DNI tiene 8 dígitos.', 'multisede-pos' ),
 				),
 			)
 		);
@@ -194,6 +202,17 @@ class MSP_POS {
 							<input type="number" id="msp-pos-recibido" step="0.01" min="0" />
 							<p id="msp-pos-vuelto"></p>
 						</div>
+
+						<?php if ( MSP_Cola::activa() ) : ?>
+							<div id="msp-pos-cliente">
+								<label for="msp-pos-dni"><?php esc_html_e( 'DNI del cliente', 'multisede-pos' ); ?></label>
+								<input type="text" id="msp-pos-dni" inputmode="numeric" maxlength="8" autocomplete="off"
+									placeholder="<?php esc_attr_e( 'opcional', 'multisede-pos' ); ?>" />
+								<input type="text" id="msp-pos-cliente-nombre" autocomplete="off"
+									placeholder="<?php esc_attr_e( 'Nombre del cliente (opcional)', 'multisede-pos' ); ?>" />
+								<p id="msp-pos-dni-aviso" class="description"></p>
+							</div>
+						<?php endif; ?>
 
 						<button type="button" class="button button-primary button-hero" id="msp-pos-cobrar">
 							<?php esc_html_e( 'Cobrar', 'multisede-pos' ); ?>
@@ -325,8 +344,16 @@ class MSP_POS {
 			wp_send_json_error( array( 'msg' => __( 'El ticket está vacío.', 'multisede-pos' ) ), 400 );
 		}
 
+		$dni            = isset( $_POST['dni'] ) ? preg_replace( '/[^0-9]/', '', wp_unslash( $_POST['dni'] ) ) : '';
+		$cliente_nombre = isset( $_POST['cliente_nombre'] ) ? sanitize_text_field( wp_unslash( $_POST['cliente_nombre'] ) ) : '';
+
+		if ( '' !== $dni && 8 !== strlen( $dni ) ) {
+			wp_send_json_error( array( 'msg' => __( 'El DNI tiene 8 dígitos.', 'multisede-pos' ) ), 400 );
+		}
+
 		// Validar stock disponible (físico − reservado) en la sede.
 		$normalizados = array();
+		$total_previo = 0.0;
 		foreach ( $items as $item ) {
 			$pid = isset( $item['id'] ) ? absint( $item['id'] ) : 0;
 			$qty = isset( $item['qty'] ) ? absint( $item['qty'] ) : 0;
@@ -337,11 +364,35 @@ class MSP_POS {
 			if ( $qty > $disponible ) {
 				wp_send_json_error( array( 'msg' => $this->msg_sin_stock( $pid, $disponible ) ), 409 );
 			}
+			$producto = wc_get_product( $pid );
+			if ( $producto ) {
+				$total_previo += (float) wc_get_price_including_tax( $producto ) * $qty;
+			}
 			$normalizados[ $pid ] = $qty;
 		}
 
 		if ( empty( $normalizados ) ) {
 			wp_send_json_error( array( 'msg' => __( 'No hay productos válidos en el ticket.', 'multisede-pos' ) ), 400 );
+		}
+
+		// SUNAT exige identificar al comprador cuando la boleta pasa de S/ 700.
+		// Se comprueba ANTES de descontar stock y crear el pedido: si falta el
+		// dato, la venta no llega a existir y el cajero solo tiene que pedir el
+		// DNI, no anular nada.
+		if ( MSP_Cola::activa()
+			&& '' === $dni
+			&& round( $total_previo, 2 ) > MSP_Comprobante::LIMITE_DNI ) {
+			wp_send_json_error(
+				array(
+					'msg'      => sprintf(
+						/* translators: %s: importe límite. */
+						__( 'Por encima de S/ %s la boleta necesita el DNI del cliente. Pídeselo y anótalo antes de cobrar.', 'multisede-pos' ),
+						number_format( MSP_Comprobante::LIMITE_DNI, 2 )
+					),
+					'foco_dni' => true,
+				),
+				400
+			);
 		}
 
 		// Descontar el stock antes de crear el pedido. El descuento es
@@ -389,6 +440,13 @@ class MSP_POS {
 		$order->update_meta_data( '_msp_reserva_estado', 'recogido' );
 		$order->update_meta_data( '_msp_pos_metodo', $metodo );
 		$order->update_meta_data( '_msp_cajero_id', get_current_user_id() );
+		if ( $dni ) {
+			$order->update_meta_data( '_msp_cliente_tipo_doc', '1' ); // 1 = DNI en el catálogo 06 de SUNAT.
+			$order->update_meta_data( '_msp_cliente_num_doc', $dni );
+		}
+		if ( $cliente_nombre ) {
+			$order->update_meta_data( '_msp_cliente_nombre', $cliente_nombre );
+		}
 		$order->update_meta_data( '_msp_stock_aplicado', '1' );
 		$order->calculate_totals();
 		$order->update_status( 'completed', __( 'Venta en mostrador (POS).', 'multisede-pos' ) );

@@ -19,5 +19,11 @@ class MSP_Deactivator {
 	 */
 	public static function deactivate() {
 		flush_rewrite_rules();
+
+		// Sin esto, el barrido de comprobantes seguiría programado contra un
+		// plugin apagado y llenaría el log de errores.
+		if ( class_exists( 'MSP_Cola' ) ) {
+			MSP_Cola::limpiar();
+		}
 	}
 }

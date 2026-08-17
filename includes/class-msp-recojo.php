@@ -71,6 +71,7 @@ class MSP_Recojo {
 			}
 			echo '</p>';
 			echo '<input type="hidden" name="msp_sede_recojo" value="' . esc_attr( $sede_activa ) . '" />';
+			$this->campo_dni( $checkout );
 			echo '</div>';
 			return;
 		}
@@ -96,7 +97,60 @@ class MSP_Recojo {
 			),
 			$checkout->get_value( 'msp_sede_recojo' )
 		);
+
+		$this->campo_dni( $checkout );
 		echo '</div>';
+	}
+
+	/**
+	 * Campo de DNI para la boleta electrónica.
+	 *
+	 * Solo aparece si la emisión automática está encendida: mientras no se
+	 * emita, pedir un documento sería pedir un dato que no se usa. Se marca
+	 * obligatorio cuando el carrito supera el límite de SUNAT.
+	 *
+	 * @param WC_Checkout $checkout Objeto del checkout.
+	 */
+	private function campo_dni( $checkout ) {
+		if ( ! class_exists( 'MSP_Cola' ) || ! MSP_Cola::activa() ) {
+			return;
+		}
+
+		$obligatorio = $this->dni_obligatorio();
+
+		woocommerce_form_field(
+			'msp_dni',
+			array(
+				'type'              => 'text',
+				'required'          => $obligatorio,
+				'class'             => array( 'form-row-wide' ),
+				'label'             => __( 'DNI (para tu boleta)', 'multisede-pos' ),
+				'description'       => $obligatorio
+					? sprintf(
+						/* translators: %s: importe límite. */
+						__( 'Obligatorio: por encima de S/ %s, SUNAT exige el documento del comprador.', 'multisede-pos' ),
+						number_format( MSP_Comprobante::LIMITE_DNI, 2 )
+					)
+					: __( 'Opcional. Si no lo pones, la boleta sale a nombre de cliente varios.', 'multisede-pos' ),
+				'custom_attributes' => array(
+					'inputmode' => 'numeric',
+					'maxlength' => '8',
+				),
+			),
+			$checkout->get_value( 'msp_dni' )
+		);
+	}
+
+	/**
+	 * ¿El carrito actual obliga a identificar al comprador?
+	 *
+	 * @return bool
+	 */
+	private function dni_obligatorio() {
+		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+			return false;
+		}
+		return round( (float) WC()->cart->get_total( 'edit' ), 2 ) > MSP_Comprobante::LIMITE_DNI;
 	}
 
 	/**
@@ -113,6 +167,26 @@ class MSP_Recojo {
 
 		if ( ! $sede ) {
 			wc_add_notice( __( 'Por favor elige la sede donde recogerás tu pedido.', 'multisede-pos' ), 'error' );
+		}
+
+		if ( ! class_exists( 'MSP_Cola' ) || ! MSP_Cola::activa() ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Woo valida el nonce del checkout.
+		$dni = isset( $_POST['msp_dni'] ) ? preg_replace( '/[^0-9]/', '', wp_unslash( $_POST['msp_dni'] ) ) : '';
+
+		if ( '' === $dni && $this->dni_obligatorio() ) {
+			wc_add_notice(
+				sprintf(
+					/* translators: %s: importe límite. */
+					__( 'Para compras de más de S/ %s necesitamos tu DNI para emitir la boleta.', 'multisede-pos' ),
+					number_format( MSP_Comprobante::LIMITE_DNI, 2 )
+				),
+				'error'
+			);
+		} elseif ( '' !== $dni && 8 !== strlen( $dni ) ) {
+			wc_add_notice( __( 'El DNI debe tener 8 dígitos.', 'multisede-pos' ), 'error' );
 		}
 	}
 
@@ -132,6 +206,13 @@ class MSP_Recojo {
 		$order->update_meta_data( '_msp_sede_id', $sede );
 		$order->update_meta_data( '_msp_origen', 'web' );
 		$order->update_meta_data( '_msp_recogido', '0' );
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Woo valida el nonce del checkout.
+		$dni = isset( $_POST['msp_dni'] ) ? preg_replace( '/[^0-9]/', '', wp_unslash( $_POST['msp_dni'] ) ) : '';
+		if ( 8 === strlen( $dni ) ) {
+			$order->update_meta_data( '_msp_cliente_tipo_doc', '1' );
+			$order->update_meta_data( '_msp_cliente_num_doc', $dni );
+		}
 	}
 
 	/**
@@ -241,6 +322,20 @@ class MSP_Recojo {
 		$order->update_meta_data( '_msp_reserva_estado', 'recogido' );
 		$order->add_order_note( __( 'Pedido recogido en tienda. Stock descontado de la sede.', 'multisede-pos' ) );
 		$order->save();
+
+		// La boleta del pedido web se emite AQUÍ, al entregarlo, no al hacerlo.
+		//
+		// Es el momento defendible mientras no se responda si se paga en
+		// efectivo al recoger: si se emitiera al crear el pedido, un pedido que
+		// nadie recoge dejaría una boleta emitida por una venta que no ocurrió,
+		// y eso se arregla con una anulación ante SUNAT. Al revés no hay daño:
+		// entre el pedido y la entrega no hay obligación de comprobante.
+		//
+		// Si la respuesta es "se paga por la web y siempre se recoge", esto se
+		// puede adelantar al pago sin tocar nada más que el hook.
+		if ( class_exists( 'MSP_Cola' ) && MSP_Cola::activa() ) {
+			MSP_Cola::encolar_pedido( $order, $sede_id );
+		}
 	}
 
 	/**

@@ -348,7 +348,13 @@ class MSP_Emisor {
 			->setTipoOperacion( '0101' )
 			->setTipoDoc( '03' )
 			->setSerie( $c['serie'] )
-			->setCorrelativo( (string) (int) $c['correlativo'] )
+			// Correlativo a 8 dígitos, el mismo formato que muestra el panel y que
+			// irá impreso en el ticket. SUNAT acepta ambas formas, pero sin el
+			// relleno el documento queda registrado como "B001-2" mientras que
+			// aquí se lee "B001-00000002": dos números para el mismo documento,
+			// y el desajuste solo aparece cuando alguien lo busca en SOL o el
+			// contador cruza el registro de ventas.
+			->setCorrelativo( sprintf( '%08d', (int) $c['correlativo'] ) )
 			->setFechaEmision( new DateTime( 'now', new DateTimeZone( wp_timezone_string() ) ) )
 			->setTipoMoneda( 'PEN' )
 			->setCompany( $empresa )

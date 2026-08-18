@@ -128,7 +128,7 @@ class MSP_Recojo {
 				'description'       => $obligatorio
 					? sprintf(
 						/* translators: %s: importe límite. */
-						__( 'Obligatorio: por encima de S/ %s, SUNAT exige el documento del comprador.', 'multisede-pos' ),
+						__( 'Obligatorio: por encima de S/ %s, la boleta tiene que llevar tu documento y tu nombre.', 'multisede-pos' ),
 						number_format( MSP_Comprobante::LIMITE_DNI, 2 )
 					)
 					: __( 'Opcional. Si no lo pones, la boleta sale a nombre de cliente varios.', 'multisede-pos' ),
@@ -187,6 +187,27 @@ class MSP_Recojo {
 			);
 		} elseif ( '' !== $dni && 8 !== strlen( $dni ) ) {
 			wc_add_notice( __( 'El DNI debe tener 8 dígitos.', 'multisede-pos' ), 'error' );
+		}
+
+		// Identificar al comprador es documento Y nombre. En la web el nombre lo
+		// pide WooCommerce en la facturación, así que esto es solo una red por si
+		// esos campos se hubieran ocultado en el tema o en el constructor.
+		if ( $this->dni_obligatorio() ) {
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Woo valida el nonce del checkout.
+			$nombre = isset( $_POST['billing_first_name'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['billing_first_name'] ) ) ) : '';
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Woo valida el nonce del checkout.
+			$apellido = isset( $_POST['billing_last_name'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['billing_last_name'] ) ) ) : '';
+
+			if ( '' === $nombre && '' === $apellido ) {
+				wc_add_notice(
+					sprintf(
+						/* translators: %s: importe límite. */
+						__( 'Para compras de más de S/ %s también necesitamos tu nombre completo para la boleta.', 'multisede-pos' ),
+						number_format( MSP_Comprobante::LIMITE_DNI, 2 )
+					),
+					'error'
+				);
+			}
 		}
 	}
 

@@ -159,22 +159,41 @@
 		return ( $( '#msp-pos-dni' ).val() || '' ).replace( /[^0-9]/g, '' );
 	}
 
+	function nombreValor() {
+		return $.trim( $( '#msp-pos-cliente-nombre' ).val() || '' );
+	}
+
+	// Por encima del límite hacen falta LAS DOS COSAS: documento y nombre. Una
+	// boleta de S/ 900 con DNI real a nombre de "CLIENTE VARIOS" es
+	// contradictoria, y así saldría impresa.
+	function faltaIdentificar() {
+		if ( ! mspPOS.boletas || totalTicket() <= mspPOS.limiteDni ) {
+			return '';
+		}
+		if ( dniValor().length !== 8 && ! nombreValor() ) {
+			return mspPOS.i18n.dni_requerido;
+		}
+		if ( dniValor().length !== 8 ) {
+			return mspPOS.i18n.falta_dni;
+		}
+		if ( ! nombreValor() ) {
+			return mspPOS.i18n.falta_nombre;
+		}
+		return '';
+	}
+
 	function avisarDni() {
 		if ( ! mspPOS.boletas ) {
 			return;
 		}
-		var $aviso = $( '#msp-pos-dni-aviso' );
-		if ( totalTicket() > mspPOS.limiteDni && dniValor().length !== 8 ) {
-			$aviso.text( mspPOS.i18n.dni_requerido ).css( 'color', '#b32d2e' );
-		} else {
-			$aviso.text( '' );
-		}
+		$( '#msp-pos-dni-aviso' ).text( faltaIdentificar() ).css( 'color', '#b32d2e' );
 	}
 
 	$( '#msp-pos-dni' ).on( 'input', function () {
 		this.value = this.value.replace( /[^0-9]/g, '' ).slice( 0, 8 );
 		avisarDni();
 	} );
+	$( '#msp-pos-cliente-nombre' ).on( 'input', avisarDni );
 
 	// Cobrar.
 	$( '#msp-pos-cobrar' ).on( 'click', function () {
@@ -189,9 +208,10 @@
 			$msg.html( '<span class="err">' + mspPOS.i18n.dni_corto + '</span>' );
 			return;
 		}
-		if ( mspPOS.boletas && ! dni && totalTicket() > mspPOS.limiteDni ) {
-			$msg.html( '<span class="err">' + mspPOS.i18n.dni_requerido + '</span>' );
-			$( '#msp-pos-dni' ).trigger( 'focus' );
+		var falta = faltaIdentificar();
+		if ( falta ) {
+			$msg.html( '<span class="err">' + falta + '</span>' );
+			$( dni.length === 8 ? '#msp-pos-cliente-nombre' : '#msp-pos-dni' ).trigger( 'focus' );
 			return;
 		}
 		if ( ! window.confirm( mspPOS.i18n.confirmar ) ) {

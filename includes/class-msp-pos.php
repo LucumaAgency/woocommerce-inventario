@@ -124,9 +124,11 @@ class MSP_POS {
 					'vuelto'         => __( 'Vuelto', 'multisede-pos' ),
 					'dni_requerido'  => sprintf(
 						/* translators: %s: importe límite. */
-						__( 'Esta venta pasa de S/ %s: la boleta necesita el DNI del cliente.', 'multisede-pos' ),
+						__( 'Esta venta pasa de S/ %s: la boleta tiene que llevar el DNI y el nombre del cliente.', 'multisede-pos' ),
 						number_format( MSP_Comprobante::LIMITE_DNI, 2 )
 					),
+					'falta_nombre'   => __( 'Falta el nombre del cliente.', 'multisede-pos' ),
+					'falta_dni'      => __( 'Falta el DNI del cliente.', 'multisede-pos' ),
 					'dni_corto'      => __( 'El DNI tiene 8 dígitos.', 'multisede-pos' ),
 				),
 			)
@@ -209,7 +211,7 @@ class MSP_POS {
 								<input type="text" id="msp-pos-dni" inputmode="numeric" maxlength="8" autocomplete="off"
 									placeholder="<?php esc_attr_e( 'opcional', 'multisede-pos' ); ?>" />
 								<input type="text" id="msp-pos-cliente-nombre" autocomplete="off"
-									placeholder="<?php esc_attr_e( 'Nombre del cliente (opcional)', 'multisede-pos' ); ?>" />
+									placeholder="<?php esc_attr_e( 'Nombre del cliente', 'multisede-pos' ); ?>" />
 								<p id="msp-pos-dni-aviso" class="description"></p>
 							</div>
 						<?php endif; ?>
@@ -375,24 +377,36 @@ class MSP_POS {
 			wp_send_json_error( array( 'msg' => __( 'No hay productos válidos en el ticket.', 'multisede-pos' ) ), 400 );
 		}
 
-		// SUNAT exige identificar al comprador cuando la boleta pasa de S/ 700.
+		// SUNAT exige identificar al comprador cuando la boleta pasa de S/ 700, y
+		// identificar es documento Y nombre: una boleta de S/ 900 con un DNI real
+		// a nombre de "CLIENTE VARIOS" es contradictoria, y así saldría impresa.
+		//
 		// Se comprueba ANTES de descontar stock y crear el pedido: si falta el
-		// dato, la venta no llega a existir y el cajero solo tiene que pedir el
-		// DNI, no anular nada.
-		if ( MSP_Cola::activa()
-			&& '' === $dni
-			&& round( $total_previo, 2 ) > MSP_Comprobante::LIMITE_DNI ) {
-			wp_send_json_error(
-				array(
-					'msg'      => sprintf(
-						/* translators: %s: importe límite. */
-						__( 'Por encima de S/ %s la boleta necesita el DNI del cliente. Pídeselo y anótalo antes de cobrar.', 'multisede-pos' ),
-						number_format( MSP_Comprobante::LIMITE_DNI, 2 )
+		// dato, la venta no llega a existir y el cajero solo tiene que pedirlo,
+		// no anular nada.
+		if ( MSP_Cola::activa() && round( $total_previo, 2 ) > MSP_Comprobante::LIMITE_DNI ) {
+			$faltan = array();
+			if ( '' === $dni ) {
+				$faltan[] = __( 'el DNI', 'multisede-pos' );
+			}
+			if ( '' === trim( $cliente_nombre ) ) {
+				$faltan[] = __( 'el nombre', 'multisede-pos' );
+			}
+
+			if ( $faltan ) {
+				wp_send_json_error(
+					array(
+						'msg'      => sprintf(
+							/* translators: 1: datos que faltan, 2: importe límite. */
+							__( 'Falta %1$s del cliente. Por encima de S/ %2$s la boleta tiene que identificar al comprador. Pídeselo antes de cobrar.', 'multisede-pos' ),
+							implode( __( ' y ', 'multisede-pos' ), $faltan ),
+							number_format( MSP_Comprobante::LIMITE_DNI, 2 )
+						),
+						'foco_dni' => true,
 					),
-					'foco_dni' => true,
-				),
-				400
-			);
+					400
+				);
+			}
 		}
 
 		// Descontar el stock antes de crear el pedido. El descuento es

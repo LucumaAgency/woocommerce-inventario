@@ -25,7 +25,18 @@ class MSP_Recojo {
 	 */
 	public function init() {
 		// Campo de sede en el checkout clásico.
-		add_action( 'woocommerce_after_order_notes', array( $this, 'campo_checkout' ) );
+		//
+		// Va ARRIBA del todo, antes de los datos de facturación: dónde recoges y
+		// el DNI de tu boleta son decisiones, no un apéndice. Colgado del final
+		// (después de las notas del pedido) el DNI quedaba donde menos se ve,
+		// justo cuando es obligatorio y bloquea la compra.
+		//
+		// El hook es filtrable por si un tema o constructor coloca sus secciones
+		// de otra forma y hace falta moverlo sin tocar el plugin.
+		add_action(
+			apply_filters( 'msp_recojo_hook_checkout', 'woocommerce_checkout_before_customer_details' ),
+			array( $this, 'campo_checkout' )
+		);
 		add_action( 'woocommerce_checkout_process', array( $this, 'validar_checkout' ) );
 		add_action( 'woocommerce_checkout_create_order', array( $this, 'guardar_sede_pedido' ), 10, 2 );
 

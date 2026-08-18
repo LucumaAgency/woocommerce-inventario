@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.9.3
+- **Versión actual:** 1.9.4
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -384,6 +384,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 - `msp_barrido_comprobantes()` — barrido horario: reintentos pendientes + alarma.
 
 ### Filtros propios
+- `msp_recojo_hook_checkout` — hook donde se pinta el bloque de recojo + DNI en el checkout clásico. Por defecto `woocommerce_checkout_before_customer_details` (arriba del todo).
 - `msp_alarma_destinatario` — correo al que va el aviso de comprobantes atascados (por defecto, el del administrador del sitio).
 
 ### Filtros de WooCommerce intervenidos
@@ -412,6 +413,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.7.0** | **Boletas Fase 1** — tabla `wp_msp_comprobantes`, reserva de correlativo a prueba de carreras, serie de boleta por sede (`_msp_serie_boleta`). Base de facturación electrónica; aún no emite |
 | **1.7.1 – 1.7.5** | Correcciones del recorrido de verificación: acceso del personal de tienda al panel, stock que no llegaba a Woo, egresos mayores que el efectivo del cajón, recuperación de capacidades del admin y menú Sedes |
 | **1.8.0** | **Boletas Fase 2** — motor de emisión con Greenter: XML UBL, firma, envío SOAP a SUNAT, CDR y conservación de archivos. Pantalla de Facturación con emisión de prueba |
+| **1.9.4** | El bloque de recojo y el DNI suben al principio del checkout (hook filtrable con `msp_recojo_hook_checkout`), y los archivos conservados se nombran con el correlativo completo |
 | **1.9.3** | Sobre S/ 700 la boleta exige **DNI y nombre**, no solo el documento: una boleta de S/ 900 con DNI real a nombre de «CLIENTE VARIOS» es contradictoria y así saldría impresa |
 | **1.9.2** | El correlativo va al XML con 8 dígitos (`B001-00000002`, no `B001-2`): el número registrado en SUNAT coincide con el del panel y el del ticket |
 | **1.9.1** | Numeración separada por entorno: `entorno` entra en la clave única (`entorno, serie, correlativo`), así las boletas de prueba dejan de gastar números de la serie real. La cola no envía un comprobante de otro entorno. **DB_VERSION 5** |

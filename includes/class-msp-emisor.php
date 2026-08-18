@@ -282,7 +282,10 @@ class MSP_Emisor {
 		}
 
 		$a      = self::ajustes();
-		$nombre = sprintf( '%s-03-%s-%d', $a['ruc'], $c['serie'], (int) $c['correlativo'] );
+		// Mismo número que va dentro del XML y que muestra el panel: si el archivo
+		// se llamara "B001-5" y el documento dijera "B001-00000005", buscar un
+		// comprobante en la carpeta de conservación sería un acertijo.
+		$nombre = sprintf( '%s-03-%s-%08d', $a['ruc'], $c['serie'], (int) $c['correlativo'] );
 		$rutas  = array( 'xml' => '', 'cdr' => '' );
 
 		$ruta_xml = $dir . '/' . $nombre . '.xml';

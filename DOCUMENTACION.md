@@ -296,7 +296,8 @@ Capa que emitirá los comprobantes electrónicos SUNAT. El POS y la web **no hab
 - `reservar( $datos )` — reserva atómica del siguiente correlativo y crea el comprobante. Devuelve la fila o un `WP_Error`.
 - `obtener()`, `obtener_por_pedido()`, `numero()` — lectura y número legible (`B001-00000042`).
 
-- `listar()`, `contar_por_estado()`, `pendientes_de_reintento()`, `atascados()` — consultas que alimentan la pantalla de Comprobantes y la cola (v1.9.0).
+- `listar()`, `contar_por_estado()`, `pendientes_de_reintento()`, `atascados()` — consultas que alimentan la pantalla de Comprobantes y la cola (v1.9.0). Las dos últimas filtran por el **entorno activo**.
+- `entorno_actual()` — `'beta'` o `'produccion'`. Desde la v1.9.1 el entorno forma parte de la clave única, así que **cada entorno lleva su propia numeración**: las pruebas ya no gastan correlativos de la serie real, y la primera boleta de producción sale como `-00000001` aunque antes se hayan hecho veinte pruebas.
 - `LIMITE_DNI` (700) — importe a partir del cual SUNAT exige identificar al comprador. Es constante y no ajuste: es la norma, no una preferencia de la tienda.
 
 ### MSP_Emisor (Fase 2 de boletas — v1.8.0)
@@ -405,6 +406,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.7.0** | **Boletas Fase 1** — tabla `wp_msp_comprobantes`, reserva de correlativo a prueba de carreras, serie de boleta por sede (`_msp_serie_boleta`). Base de facturación electrónica; aún no emite |
 | **1.7.1 – 1.7.5** | Correcciones del recorrido de verificación: acceso del personal de tienda al panel, stock que no llegaba a Woo, egresos mayores que el efectivo del cajón, recuperación de capacidades del admin y menú Sedes |
 | **1.8.0** | **Boletas Fase 2** — motor de emisión con Greenter: XML UBL, firma, envío SOAP a SUNAT, CDR y conservación de archivos. Pantalla de Facturación con emisión de prueba |
+| **1.9.1** | Numeración separada por entorno: `entorno` entra en la clave única (`entorno, serie, correlativo`), así las boletas de prueba dejan de gastar números de la serie real. La cola no envía un comprobante de otro entorno. **DB_VERSION 5** |
 | **1.9.0** | **Boletas Fase 3** — cola de emisión en segundo plano (Action Scheduler) con reintentos de espera creciente, alarma por correo a los 2 días, pantalla **Comprobantes** y captura de **DNI** en POS y checkout (obligatoria sobre S/ 700). Esquema **DB_VERSION 4** (`proximo_intento`, `alertado_at`) |
 
 ---

@@ -17,7 +17,7 @@ class MSP_Activator {
 	/**
 	 * Versión del esquema de base de datos.
 	 */
-	const DB_VERSION = '4';
+	const DB_VERSION = '5';
 
 	/**
 	 * Aplica el esquema si cambió desde la última vez.
@@ -130,13 +130,19 @@ class MSP_Activator {
 
 		// Comprobantes electrónicos (boletas SUNAT). Fase 1 de facturación.
 		// El correlativo se reserva insertando una fila: el índice UNIQUE
-		// (serie, correlativo) impide repetir o saltar números aunque dos
-		// cajeros emitan a la vez. Mismo principio que descontar_si_hay del stock.
+		// (entorno, serie, correlativo) impide repetir o saltar números aunque
+		// dos cajeros emitan a la vez. Mismo principio que descontar_si_hay.
+		//
+		// El `entorno` forma parte de la clave desde la v1.9.1: beta y
+		// producción llevan numeraciones separadas. Sin eso, cada boleta de
+		// prueba gastaba un número de la serie real y la primera boleta de
+		// verdad salía con el correlativo veintitantos.
 		$sql_comprobantes = "CREATE TABLE {$prefix}msp_comprobantes (
 			id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
 			pedido_id BIGINT(20) UNSIGNED NULL DEFAULT NULL,
 			sede_id BIGINT(20) UNSIGNED NOT NULL,
 			tipo VARCHAR(20) NOT NULL DEFAULT 'boleta',
+			entorno VARCHAR(12) NOT NULL DEFAULT 'beta',
 			serie VARCHAR(4) NOT NULL,
 			correlativo INT(11) UNSIGNED NOT NULL,
 			cliente_tipo_doc VARCHAR(2) NOT NULL DEFAULT '0',
@@ -156,7 +162,7 @@ class MSP_Activator {
 			emitido_at DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
 			enviado_at DATETIME NULL DEFAULT NULL,
 			PRIMARY KEY  (id),
-			UNIQUE KEY serie_correlativo (serie, correlativo),
+			UNIQUE KEY entorno_serie_correlativo (entorno, serie, correlativo),
 			KEY pedido_id (pedido_id),
 			KEY sede_id (sede_id),
 			KEY estado (estado),
@@ -167,5 +173,44 @@ class MSP_Activator {
 		dbDelta( $sql_caja_sesiones );
 		dbDelta( $sql_caja_movimientos );
 		dbDelta( $sql_comprobantes );
+
+		self::migrar_indice_comprobantes();
+	}
+
+	/**
+	 * Retira el índice único antiguo de comprobantes (serie, correlativo).
+	 *
+	 * dbDelta sabe crear índices nuevos pero no borrar los que sobran, así que
+	 * el viejo hay que quitarlo a mano. Mientras siga puesto, beta y producción
+	 * no pueden compartir un número: justo lo que la v1.9.1 quiere permitir.
+	 *
+	 * Se hace después de dbDelta y comprobando que el índice nuevo exista: si
+	 * la creación hubiera fallado, quitar el viejo dejaría la tabla sin ninguna
+	 * red contra correlativos duplicados, que es el peor escenario posible.
+	 */
+	private static function migrar_indice_comprobantes() {
+		global $wpdb;
+
+		$tabla = $wpdb->prefix . 'msp_comprobantes';
+
+		$existe_nuevo = $wpdb->get_var(
+			$wpdb->prepare(
+				"SHOW INDEX FROM {$tabla} WHERE Key_name = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				'entorno_serie_correlativo'
+			)
+		);
+		if ( ! $existe_nuevo ) {
+			return;
+		}
+
+		$existe_viejo = $wpdb->get_var(
+			$wpdb->prepare(
+				"SHOW INDEX FROM {$tabla} WHERE Key_name = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				'serie_correlativo'
+			)
+		);
+		if ( $existe_viejo ) {
+			$wpdb->query( "ALTER TABLE {$tabla} DROP INDEX serie_correlativo" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery
+		}
 	}
 }

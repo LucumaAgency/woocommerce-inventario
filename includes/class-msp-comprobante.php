@@ -39,6 +39,19 @@ class MSP_Comprobante {
 	const LIMITE_DNI = 700;
 
 	/**
+	 * Entorno de emisión actual ('beta' o 'produccion').
+	 *
+	 * Cada entorno lleva su propia numeración. Las boletas de prueba ya no
+	 * gastan números de la serie real: sin esto, tras veinte pruebas la primera
+	 * boleta de verdad salía como B001-00000021.
+	 *
+	 * @return string
+	 */
+	public static function entorno_actual() {
+		return ( class_exists( 'MSP_Emisor' ) && MSP_Emisor::es_produccion() ) ? 'produccion' : 'beta';
+	}
+
+	/**
 	 * Nombre de la tabla.
 	 *
 	 * @return string
@@ -104,8 +117,8 @@ class MSP_Comprobante {
 	 * Reserva el siguiente correlativo de una serie y crea la fila del comprobante.
 	 *
 	 * Estrategia optimista, igual que descontar_si_hay del stock: se calcula el
-	 * siguiente número y se intenta INSERTAR. El índice UNIQUE (serie, correlativo)
-	 * rechaza el duplicado si otro cajero se adelantó; en ese caso se reintenta con
+	 * siguiente número y se intenta INSERTAR. El índice UNIQUE
+	 * (entorno, serie, correlativo) rechaza el duplicado si otro cajero se adelantó; en ese caso se reintenta con
 	 * el siguiente. Nunca se repite ni se salta un número, y nunca usamos
 	 * SELECT MAX()+1 sin la red del índice único.
 	 *
@@ -143,15 +156,18 @@ class MSP_Comprobante {
 			);
 		}
 
-		$tabla = self::tabla();
-		$ahora = current_time( 'mysql' );
+		$tabla   = self::tabla();
+		$ahora   = current_time( 'mysql' );
+		$entorno = self::entorno_actual();
 
 		for ( $intento = 0; $intento < self::MAX_REINTENTOS_RESERVA; $intento++ ) {
-			// Siguiente correlativo de ESTA serie (empieza en 1 si no hay ninguno).
+			// Siguiente correlativo de ESTA serie EN ESTE ENTORNO (empieza en 1
+			// si no hay ninguno). Beta y producción no comparten numeración.
 			$max = (int) $wpdb->get_var(
 				$wpdb->prepare(
-					"SELECT MAX(correlativo) FROM {$tabla} WHERE serie = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-					$serie
+					"SELECT MAX(correlativo) FROM {$tabla} WHERE serie = %s AND entorno = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$serie,
+					$entorno
 				)
 			);
 			$siguiente = $max + 1;
@@ -165,6 +181,7 @@ class MSP_Comprobante {
 					'pedido_id'        => isset( $datos['pedido_id'] ) ? (int) $datos['pedido_id'] : null,
 					'sede_id'          => $sede_id,
 					'tipo'             => isset( $datos['tipo'] ) ? sanitize_key( $datos['tipo'] ) : 'boleta',
+					'entorno'          => $entorno,
 					'serie'            => $serie,
 					'correlativo'      => $siguiente,
 					'cliente_tipo_doc' => isset( $datos['cliente_tipo_doc'] ) ? substr( sanitize_text_field( $datos['cliente_tipo_doc'] ), 0, 2 ) : '0',
@@ -175,7 +192,7 @@ class MSP_Comprobante {
 					'estado'           => 'pendiente',
 					'emitido_at'       => $ahora,
 				),
-				array( '%d', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%f', '%f', '%s', '%s' )
+				array( '%d', '%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%f', '%f', '%s', '%s' )
 			);
 			$wpdb->suppress_errors( $suprimir );
 
@@ -298,6 +315,7 @@ class MSP_Comprobante {
 			array(
 				'estado'  => '',
 				'sede_id' => 0,
+				'entorno' => '',
 				'buscar'  => '',
 				'por_pag' => 30,
 				'pagina'  => 1,
@@ -315,6 +333,10 @@ class MSP_Comprobante {
 		if ( $args['sede_id'] ) {
 			$where[]  = 'sede_id = %d';
 			$params[] = (int) $args['sede_id'];
+		}
+		if ( $args['entorno'] ) {
+			$where[]  = 'entorno = %s';
+			$params[] = sanitize_key( $args['entorno'] );
 		}
 		if ( '' !== trim( (string) $args['buscar'] ) ) {
 			$buscar   = trim( (string) $args['buscar'] );
@@ -353,16 +375,25 @@ class MSP_Comprobante {
 	/**
 	 * Cuenta comprobantes por estado, para el resumen de la pantalla.
 	 *
+	 * @param string $entorno Limita el conteo a un entorno ('' = todos).
 	 * @return array Mapa estado => cantidad.
 	 */
-	public static function contar_por_estado() {
+	public static function contar_por_estado( $entorno = '' ) {
 		global $wpdb;
 		$tabla = self::tabla();
 
-		$filas = $wpdb->get_results(
-			"SELECT estado, COUNT(*) AS n FROM {$tabla} GROUP BY estado", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			ARRAY_A
-		);
+		$filas = $entorno
+			? $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT estado, COUNT(*) AS n FROM {$tabla} WHERE entorno = %s GROUP BY estado", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					sanitize_key( $entorno )
+				),
+				ARRAY_A
+			)
+			: $wpdb->get_results(
+				"SELECT estado, COUNT(*) AS n FROM {$tabla} GROUP BY estado", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				ARRAY_A
+			);
 
 		$out = array();
 		foreach ( (array) $filas as $f ) {
@@ -381,14 +412,19 @@ class MSP_Comprobante {
 		global $wpdb;
 		$tabla = self::tabla();
 
+		// Solo los del entorno activo. Un pendiente que quedó en beta no puede
+		// reintentarse cuando el sitio ya apunta a producción: se emitiría de
+		// verdad una boleta que era una prueba.
 		return (array) $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT * FROM {$tabla}
 				 WHERE estado IN ('pendiente','error')
+				   AND entorno = %s
 				   AND proximo_intento IS NOT NULL
 				   AND proximo_intento <= %s
 				 ORDER BY proximo_intento ASC
 				 LIMIT %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				self::entorno_actual(),
 				current_time( 'mysql' ),
 				(int) $limite
 			),
@@ -407,13 +443,18 @@ class MSP_Comprobante {
 		$tabla  = self::tabla();
 		$limite = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - ( (int) $dias * DAY_IN_SECONDS ) );
 
+		// Solo el entorno activo: en producción, unas pruebas de beta olvidadas
+		// no deben disparar la alarma. La alarma tiene que doler solo cuando hay
+		// una venta real sin comprobante.
 		return (array) $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT * FROM {$tabla}
 				 WHERE estado IN ('pendiente','error','rechazado')
+				   AND entorno = %s
 				   AND emitido_at <= %s
 				   AND alertado_at IS NULL
 				 ORDER BY emitido_at ASC", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				self::entorno_actual(),
 				$limite
 			),
 			ARRAY_A

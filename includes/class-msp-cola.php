@@ -262,6 +262,15 @@ class MSP_Cola {
 			return;
 		}
 
+		// Guarda dura: un comprobante reservado en beta NO se envía desde un
+		// sitio que ya apunta a producción. Sería emitir de verdad una boleta
+		// que era una prueba, y eso solo se deshace con una anulación ante
+		// SUNAT. La cola lo deja quieto, sin reprogramar.
+		if ( isset( $c['entorno'] ) && $c['entorno'] !== MSP_Comprobante::entorno_actual() ) {
+			MSP_Comprobante::actualizar( $comprobante_id, array( 'proximo_intento' => null ) );
+			return;
+		}
+
 		// Un rechazo es un dato mal puesto, no un fallo pasajero: reintentarlo
 		// sin tocar nada da exactamente el mismo rechazo. Solo se reintenta a
 		// mano, desde la pantalla de Comprobantes.

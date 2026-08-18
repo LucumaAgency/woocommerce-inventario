@@ -187,21 +187,54 @@ class MSP_Comprobantes {
 		$aviso   = isset( $_GET['aviso'] ) ? sanitize_text_field( wp_unslash( $_GET['aviso'] ) ) : '';
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
+		// Por defecto se ve SOLO el entorno activo. Mezclar pruebas y boletas
+		// reales en la misma lista es la forma más fácil de que alguien lea un
+		// número de prueba como si fuera una venta.
+		$entorno = isset( $_GET['entorno'] ) ? sanitize_key( wp_unslash( $_GET['entorno'] ) ) : MSP_Comprobante::entorno_actual(); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( 'todos' === $entorno ) {
+			$entorno = '';
+		}
+
 		$datos = MSP_Comprobante::listar(
 			array(
 				'estado'  => $estado,
 				'sede_id' => $sede_id,
+				'entorno' => $entorno,
 				'buscar'  => $buscar,
 				'por_pag' => self::POR_PAGINA,
 				'pagina'  => $pagina,
 			)
 		);
 
-		$conteo = MSP_Comprobante::contar_por_estado();
+		$conteo = MSP_Comprobante::contar_por_estado( $entorno );
 		$sedes  = MSP_Sedes::obtener_sedes_activas();
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Comprobantes electrónicos', 'multisede-pos' ); ?></h1>
+
+			<p>
+				<?php if ( '' === $entorno ) : ?>
+					<strong><?php esc_html_e( 'Viendo: todos los entornos.', 'multisede-pos' ); ?></strong>
+				<?php elseif ( 'produccion' === $entorno ) : ?>
+					<strong><?php esc_html_e( 'Viendo: comprobantes REALES (producción).', 'multisede-pos' ); ?></strong>
+				<?php else : ?>
+					<strong><?php esc_html_e( 'Viendo: comprobantes de PRUEBA (beta).', 'multisede-pos' ); ?></strong>
+					<?php esc_html_e( 'No existen para SUNAT y llevan su propia numeración.', 'multisede-pos' ); ?>
+				<?php endif; ?>
+				<?php
+				$otros = array(
+					'beta'       => __( 'ver pruebas', 'multisede-pos' ),
+					'produccion' => __( 'ver reales', 'multisede-pos' ),
+					'todos'      => __( 'ver todos', 'multisede-pos' ),
+				);
+				foreach ( $otros as $clave => $texto ) :
+					if ( $clave === $entorno || ( 'todos' === $clave && '' === $entorno ) ) {
+						continue;
+					}
+					?>
+					· <a href="<?php echo esc_url( add_query_arg( array( 'page' => self::PAGE, 'entorno' => $clave ), admin_url( 'admin.php' ) ) ); ?>"><?php echo esc_html( $texto ); ?></a>
+				<?php endforeach; ?>
+			</p>
 
 			<?php if ( $aviso ) : ?>
 				<div class="notice notice-info"><p><?php echo esc_html( $aviso ); ?></p></div>
@@ -241,7 +274,7 @@ class MSP_Comprobantes {
 					$n = '' === $clave ? array_sum( $conteo ) : ( isset( $conteo[ $clave ] ) ? $conteo[ $clave ] : 0 );
 					?>
 					<li>
-						<a href="<?php echo esc_url( add_query_arg( array( 'page' => self::PAGE, 'estado' => $clave ), admin_url( 'admin.php' ) ) ); ?>"
+						<a href="<?php echo esc_url( add_query_arg( array( 'page' => self::PAGE, 'estado' => $clave, 'entorno' => $entorno ? $entorno : 'todos' ), admin_url( 'admin.php' ) ) ); ?>"
 							class="<?php echo $estado === $clave ? 'current' : ''; ?>">
 							<?php echo esc_html( $texto ); ?> <span class="count">(<?php echo (int) $n; ?>)</span>
 						</a><?php echo $clave === $ultimo ? '' : ' |'; ?>
@@ -252,6 +285,7 @@ class MSP_Comprobantes {
 			<form method="get" style="margin:12px 0;clear:both">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE ); ?>" />
 				<input type="hidden" name="estado" value="<?php echo esc_attr( $estado ); ?>" />
+				<input type="hidden" name="entorno" value="<?php echo esc_attr( $entorno ? $entorno : 'todos' ); ?>" />
 				<select name="sede">
 					<option value="0"><?php esc_html_e( 'Todas las tiendas', 'multisede-pos' ); ?></option>
 					<?php foreach ( $sedes as $sede ) : ?>
@@ -286,6 +320,9 @@ class MSP_Comprobantes {
 						<tr>
 							<td>
 								<strong><?php echo esc_html( MSP_Comprobante::numero( $c ) ); ?></strong>
+								<?php if ( 'produccion' !== $c['entorno'] ) : ?>
+									<span style="background:#f0f0f1;color:#50575e;border-radius:3px;padding:1px 5px;font-size:11px"><?php esc_html_e( 'prueba', 'multisede-pos' ); ?></span>
+								<?php endif; ?>
 								<?php if ( $c['pedido_id'] ) : ?>
 									<br><a href="<?php echo esc_url( admin_url( 'post.php?post=' . (int) $c['pedido_id'] . '&action=edit' ) ); ?>">
 										<?php printf( '#%d', (int) $c['pedido_id'] ); ?>

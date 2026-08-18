@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.7.0
+- **Versión actual:** 1.9.1
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -87,6 +87,11 @@ multisede-pos/
 │   ├── class-msp-frontend.php     # Compra por tienda: stock visible y validación por sede
 │   ├── class-msp-pos.php          # Punto de venta de mostrador (AJAX)
 │   ├── class-msp-caja.php         # Caja chica: sesiones, movimientos, arqueo
+│   ├── class-msp-comprobante.php  # Reserva de correlativos y acceso a la tabla
+│   ├── class-msp-emisor.php       # Motor Greenter: XML, firma y envio a SUNAT
+│   ├── class-msp-cola.php         # Cuando se emite: encolado, reintentos, alarma
+│   ├── class-msp-comprobantes.php # Pantalla Comprobantes (gerencia)
+│   ├── class-msp-facturacion.php  # Ajustes de facturacion y emision de prueba
 │   ├── class-msp-inventario.php   # Pantalla de stock por sede (ajuste sin tocar el catálogo)
 │   ├── class-msp-wizard.php       # Asistente de configuración al activar
 │   └── class-msp-ayuda.php        # Manual de uso dentro del panel (por rol)
@@ -140,7 +145,7 @@ Prefijo de código: `msp_` / `MSP_`. Textdomain: `multisede-pos`.
 | `pedido_id` | Pedido asociado (en ventas POS) |
 | `creado_at` | Fecha |
 
-**`wp_msp_comprobantes`** — comprobantes electrónicos SUNAT (boletas). Añadida en v1.7.0 (Fase 1 de facturación). El correlativo se reserva con un `INSERT` que el índice `UNIQUE (serie, correlativo)` rechaza si otro cajero se adelantó, y se reintenta con el siguiente: no puede repetir ni saltar números (mismo principio que `MSP_Stock::descontar_si_hay`). **Nunca se calcula con `SELECT MAX()+1` sin la red del índice único.**
+**`wp_msp_comprobantes`** — comprobantes electrónicos SUNAT (boletas). Añadida en v1.7.0 (Fase 1 de facturación). El correlativo se reserva con un `INSERT` que el índice `UNIQUE (entorno, serie, correlativo)` rechaza si otro cajero se adelantó, y se reintenta con el siguiente: no puede repetir ni saltar números (mismo principio que `MSP_Stock::descontar_si_hay`). **Nunca se calcula con `SELECT MAX()+1` sin la red del índice único.**
 
 | Columna | Descripción |
 |---|---|
@@ -148,11 +153,12 @@ Prefijo de código: `msp_` / `MSP_`. Textdomain: `multisede-pos`.
 | `pedido_id` | Pedido Woo asociado (POS o web) |
 | `sede_id` | Sede emisora |
 | `tipo` | `boleta` (reservado sitio para `factura`, `nota_credito`) |
-| `serie`, `correlativo` | Número del comprobante — **UNIQUE (serie, correlativo)** |
+| `entorno` | `beta` / `produccion`. Cada entorno numera por separado: las pruebas no gastan correlativos reales (v1.9.1) |
+| `serie`, `correlativo` | Número del comprobante — **UNIQUE (entorno, serie, correlativo)** |
 | `cliente_tipo_doc`, `cliente_num_doc`, `cliente_nombre` | DNI si el monto lo exige (> S/ 700) |
 | `total`, `igv` | Importes declarados |
 | `estado` | `pendiente` / `enviado` / `aceptado` / `rechazado` / `anulado` |
-| `intentos`, `ultimo_error` | Para la cola y el diagnóstico (Fase 3) |
+| `intentos`, `ultimo_error`, `proximo_intento`, `alertado_at` | Cola, reintentos y alarma (Fase 3) |
 | `hash`, `xml_path`, `cdr_path`, `pdf_url` | Documentos a conservar por ley (Fase 2/5) |
 | `emitido_at`, `enviado_at` | Fechas (el plazo de 7 días se cuenta desde `emitido_at`) |
 

@@ -66,7 +66,7 @@ class MSP_Baja {
 		// Trabajo de fondo.
 		add_action( self::HOOK_ENVIAR, array( __CLASS__, 'enviar' ) );
 		add_action( self::HOOK_TICKET, array( __CLASS__, 'consultar' ) );
-		add_action( self::HOOK_AGRUPAR, array( __CLASS__, 'agrupar_y_enviar' ) );
+		add_action( self::HOOK_AGRUPAR, array( __CLASS__, 'agrupar_y_enviar' ), 10, 1 );
 
 		add_action( 'init', array( __CLASS__, 'programar_agrupacion' ) );
 	}
@@ -181,8 +181,16 @@ class MSP_Baja {
 		);
 		$order->save();
 
-		// No se espera al barrido diario: si el plazo aprieta, cuanto antes.
-		self::programar( self::HOOK_AGRUPAR, array(), 5 * MINUTE_IN_SECONDS );
+		// No se espera al barrido periódico: si el plazo aprieta, cuanto antes.
+		//
+		// El argumento 'nudge' NO es decorativo: sin él, la comprobación de
+		// "¿ya hay una acción programada con este hook?" encuentra siempre la
+		// **recurrente** y decide que no hay nada que hacer, así que este aviso
+		// inmediato no se programaba nunca y toda baja acababa esperando al
+		// barrido de 6 horas. Con un argumento distinto son dos acciones
+		// distintas, y entre varios avisos seguidos se sigue evitando el
+		// duplicado.
+		self::programar( self::HOOK_AGRUPAR, array( 'nudge' ), 5 * MINUTE_IN_SECONDS );
 	}
 
 	/**
@@ -192,7 +200,9 @@ class MSP_Baja {
 	 * que se anularon: el resumen diario informa de los comprobantes de un día
 	 * concreto, así que dos boletas de días distintos no caben en el mismo.
 	 */
-	public static function agrupar_y_enviar() {
+	public static function agrupar_y_enviar( $motivo = '' ) {
+		unset( $motivo ); // Solo distingue el aviso inmediato del barrido periódico.
+
 		global $wpdb;
 
 		if ( ! MSP_Cola::activa() ) {
@@ -413,6 +423,7 @@ class MSP_Baja {
 	public static function limpiar() {
 		if ( function_exists( 'as_unschedule_all_actions' ) ) {
 			as_unschedule_all_actions( self::HOOK_AGRUPAR, array(), self::GRUPO );
+			as_unschedule_all_actions( self::HOOK_AGRUPAR, array( 'nudge' ), self::GRUPO );
 			as_unschedule_all_actions( self::HOOK_ENVIAR, null, self::GRUPO );
 			as_unschedule_all_actions( self::HOOK_TICKET, null, self::GRUPO );
 		}

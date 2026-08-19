@@ -60,7 +60,23 @@ class MSP_Entregas {
 	 * @return int[]
 	 */
 	private function mis_sedes() {
-		if ( current_user_can( 'manage_options' ) || current_user_can( 'msp_ver_reportes' ) ) {
+		return self::sedes_de( get_current_user_id() );
+	}
+
+	/**
+	 * Sedes cuyas entregas puede atender un usuario.
+	 *
+	 * Público y con el usuario explícito para poder comprobarlo sin depender de
+	 * quién esté conectado: es la regla que impide que un cajero entregue el
+	 * pedido de otra tienda.
+	 *
+	 * @param int $user_id Usuario.
+	 * @return int[]
+	 */
+	public static function sedes_de( $user_id ) {
+		$user_id = (int) $user_id;
+
+		if ( user_can( $user_id, 'manage_options' ) || user_can( $user_id, 'msp_ver_reportes' ) ) {
 			return array_map(
 				function ( $s ) {
 					return (int) $s->ID;
@@ -69,7 +85,7 @@ class MSP_Entregas {
 			);
 		}
 
-		return array_map( 'intval', MSP_Roles::sedes_de_usuario( get_current_user_id() ) );
+		return array_map( 'intval', MSP_Roles::sedes_de_usuario( $user_id ) );
 	}
 
 	/**

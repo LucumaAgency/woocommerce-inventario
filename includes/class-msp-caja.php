@@ -499,18 +499,7 @@ class MSP_Caja {
 			return 'anular_no_existe';
 		}
 
-		// La venta tiene que ser de este turno: misma sede, mismo cajero y
-		// dentro de la ventana del turno. Sin esto, cambiar el número en el
-		// formulario permitiría anular cualquier pedido de la tienda.
-		$de_este_turno = false;
-		foreach ( self::ventas_de_sesion( $sesion ) as $venta ) {
-			if ( (int) $venta->get_id() === (int) $order->get_id() ) {
-				$de_este_turno = true;
-				break;
-			}
-		}
-
-		if ( ! $de_este_turno ) {
+		if ( ! self::venta_es_del_turno( $order->get_id(), $sesion ) ) {
 			return 'anular_otro_turno';
 		}
 
@@ -536,6 +525,27 @@ class MSP_Caja {
 		$order->update_status( 'cancelled' );
 
 		return 'anulada';
+	}
+
+	/**
+	 * ¿Esa venta pertenece a este turno de caja?
+	 *
+	 * Se comprueba contra la lista real de ventas de la sesión —misma sede,
+	 * mismo cajero, dentro de la ventana del turno— y no contra el número que
+	 * llega en el formulario. Sin esto, cambiar ese número permitiría anular
+	 * cualquier pedido de la tienda.
+	 *
+	 * @param int    $order_id ID del pedido.
+	 * @param object $sesion   Sesión de caja.
+	 * @return bool
+	 */
+	public static function venta_es_del_turno( $order_id, $sesion ) {
+		foreach ( self::ventas_de_sesion( $sesion ) as $venta ) {
+			if ( (int) $venta->get_id() === (int) $order_id ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

@@ -100,6 +100,9 @@ class MSP_Pruebas {
 			case 'comprobar_fase4':
 				$aviso = $this->comprobar_fase4( $sede_id );
 				break;
+			case 'comprobar_permisos':
+				$aviso = $this->comprobar_permisos();
+				break;
 			case 'stock_uno':
 				$aviso = $this->escenario_stock_uno( $sede_id );
 				break;
@@ -480,6 +483,141 @@ class MSP_Pruebas {
 	}
 
 	/**
+	 * Comprueba las reglas de permisos del rol Cajero.
+	 *
+	 * Automatiza **la regla**, no la pantalla. Verifica qué capacidades tiene
+	 * cada rol y que los dos filtros por sede/turno hacen lo que dicen. Eso lo
+	 * hace mejor un script que una persona: no se cansa ni se salta
+	 * combinaciones, y detecta al instante un olvido de `ROLES_VERSION`.
+	 *
+	 * **Lo que NO sustituye: entrar como cajero de verdad.** El peor fallo de
+	 * este plugin (v1.7.1) fue que WooCommerce expulsaba al cajero de todo el
+	 * panel: ningún cajero podía trabajar. La lógica de permisos era correcta;
+	 * fallaba una redirección al entrar. Ninguna comprobación como esta lo
+	 * habría visto.
+	 *
+	 * @return string Resultado.
+	 */
+	private function comprobar_permisos() {
+		$lineas = array();
+		$fallos = 0;
+
+		// ── El rol Cajero tiene lo justo ─────────────────────────────────────
+		$debe    = array( 'read', 'msp_ver_stock', 'msp_usar_pos', 'msp_gestionar_caja', 'msp_anular_ventas' );
+		$no_debe = array( 'msp_ver_reportes', 'msp_gestionar_sedes', 'msp_gestionar_stock', 'edit_shop_orders', 'manage_options' );
+
+		$rol = get_role( 'msp_cajero' );
+		if ( ! $rol ) {
+			$lineas[] = '❌ ' . __( 'el rol Cajero no existe.', 'multisede-pos' );
+			$fallos++;
+		} else {
+			$faltan = array();
+			$sobran = array();
+			foreach ( $debe as $cap ) {
+				if ( ! $rol->has_cap( $cap ) ) {
+					$faltan[] = $cap;
+				}
+			}
+			foreach ( $no_debe as $cap ) {
+				if ( $rol->has_cap( $cap ) ) {
+					$sobran[] = $cap;
+				}
+			}
+
+			if ( $faltan || $sobran ) {
+				$lineas[] = sprintf(
+					'❌ ' . __( 'capacidades del Cajero — faltan: %1$s · sobran: %2$s', 'multisede-pos' ),
+					$faltan ? implode( ', ', $faltan ) : '—',
+					$sobran ? implode( ', ', $sobran ) : '—'
+				);
+				$fallos++;
+			} else {
+				$lineas[] = '✅ ' . __( 'el Cajero tiene lo justo: vende, cobra, ve stock y anula lo suyo; no ve reportes ni edita pedidos.', 'multisede-pos' );
+			}
+		}
+
+		// ── Entregas: cada cajero, solo sus sedes ────────────────────────────
+		$cajeros = get_users(
+			array(
+				'role'   => 'msp_cajero',
+				'number' => 5,
+				'fields' => 'ID',
+			)
+		);
+
+		if ( ! $cajeros ) {
+			$lineas[] = '⚪ ' . __( 'no hay ningún usuario con rol Cajero: no se pudo comprobar el filtro por sede ni el de turno.', 'multisede-pos' );
+		} else {
+			$mal = array();
+			foreach ( $cajeros as $uid ) {
+				$suyas = MSP_Entregas::sedes_de( (int) $uid );
+				$meta  = array_map( 'intval', MSP_Roles::sedes_de_usuario( (int) $uid ) );
+				if ( array_diff( $suyas, $meta ) || array_diff( $meta, $suyas ) ) {
+					$user  = get_userdata( (int) $uid );
+					$mal[] = $user ? $user->user_login : $uid;
+				}
+			}
+
+			if ( $mal ) {
+				$lineas[] = sprintf(
+					'❌ ' . __( 'Entregas no filtra bien las sedes de: %s', 'multisede-pos' ),
+					implode( ', ', $mal )
+				);
+				$fallos++;
+			} else {
+				$lineas[] = sprintf(
+					/* translators: %d: número de cajeros comprobados. */
+					'✅ ' . _n( 'Entregas filtra por sede correctamente (%d cajero).', 'Entregas filtra por sede correctamente (%d cajeros).', count( $cajeros ), 'multisede-pos' ),
+					count( $cajeros )
+				);
+			}
+		}
+
+		// ── Anular: solo ventas del turno abierto ────────────────────────────
+		// Se comprueba con un pedido que existe pero NO pertenece a la sesión:
+		// es el intento de colar otro número en el formulario.
+		global $wpdb;
+		$sesion = $wpdb->get_row(
+			"SELECT * FROM " . MSP_Caja::tabla_sesiones() . " WHERE estado = 'abierta' AND es_practica = 0 ORDER BY id DESC LIMIT 1" // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		);
+
+		if ( ! $sesion ) {
+			$lineas[] = '⚪ ' . __( 'no hay ninguna caja abierta: no se pudo comprobar el filtro de turno. Abre una y repite.', 'multisede-pos' );
+		} else {
+			$ajeno = (int) $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT id FROM {$wpdb->posts} WHERE post_type = 'shop_order' AND ID NOT IN (
+						SELECT pedido_id FROM " . MSP_Comprobante::tabla() . " WHERE pedido_id IS NOT NULL
+					) ORDER BY ID DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					1
+				)
+			);
+
+			// Un pedido inexistente sirve igual: lo que se comprueba es que la
+			// pertenencia se decide contra la lista real de ventas del turno.
+			$id_falso = $ajeno ? $ajeno : 999999999;
+
+			if ( MSP_Caja::venta_es_del_turno( $id_falso, $sesion ) ) {
+				$lineas[] = '❌ ' . __( 'un pedido ajeno al turno se da por propio: se podría anular cualquier venta de la tienda.', 'multisede-pos' );
+				$fallos++;
+			} else {
+				$lineas[] = '✅ ' . __( 'un pedido ajeno al turno se rechaza: no se puede anular la venta de otro.', 'multisede-pos' );
+			}
+		}
+
+		$cabecera = 0 === $fallos
+			? __( 'Permisos: todo correcto.', 'multisede-pos' )
+			: sprintf(
+				/* translators: %d: número de fallos. */
+				_n( 'Permisos: %d fallo.', 'Permisos: %d fallos.', $fallos, 'multisede-pos' ),
+				$fallos
+			);
+
+		return $cabecera . ' — ' . implode( ' | ', $lineas ) . ' ⚠️ ' .
+			__( 'Esto comprueba las reglas, no las pantallas: sigue haciendo falta entrar como cajero al menos una vez.', 'multisede-pos' );
+	}
+
+	/**
 	 * Deja un producto con exactamente una unidad disponible en la sede.
 	 *
 	 * @param int $sede_id Sede.
@@ -563,6 +701,22 @@ class MSP_Pruebas {
 					</label>
 				</p>
 				<?php submit_button( __( 'Comprobar Fase 4', 'multisede-pos' ), 'secondary', 'submit', false ); ?>
+			</form>
+
+			<hr>
+
+			<h2><?php esc_html_e( 'Comprobar los permisos del Cajero', 'multisede-pos' ); ?></h2>
+			<p style="max-width:70ch">
+				<?php esc_html_e( 'Verifica qué capacidades tiene el rol Cajero, que Entregas filtre por su sede y que no pueda anular ventas de otro turno. No emite nada ni toca datos.', 'multisede-pos' ); ?>
+			</p>
+			<p style="max-width:70ch">
+				<strong><?php esc_html_e( 'No sustituye a entrar como cajero.', 'multisede-pos' ); ?></strong>
+				<?php esc_html_e( 'El peor fallo de este plugin fue que WooCommerce expulsaba al cajero de todo el panel: la lógica de permisos era correcta y fallaba una redirección al entrar. Eso solo se ve iniciando sesión con ese perfil.', 'multisede-pos' ); ?>
+			</p>
+			<form method="post">
+				<?php wp_nonce_field( 'msp_pruebas', 'msp_pruebas_nonce' ); ?>
+				<input type="hidden" name="msp_prueba_action" value="comprobar_permisos" />
+				<?php submit_button( __( 'Comprobar permisos', 'multisede-pos' ), 'secondary', 'submit', false ); ?>
 			</form>
 
 			<hr>

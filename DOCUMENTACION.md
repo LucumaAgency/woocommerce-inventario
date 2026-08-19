@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.10.0
+- **Versión actual:** 1.11.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -335,7 +335,16 @@ Una boleta no se borra: se comunica su **baja** listándola en un **resumen diar
 - `enviar()` / `consultar()` — el ciclo asíncrono: `sendSummary` devuelve un **ticket** y el resultado se pregunta después con `getStatus`. El código `98` de SUNAT significa "en proceso" y se reintenta; el `0` acepta y el `99` rechaza (y un rechazo no se reintenta solo, igual que en las boletas).
 - `MSP_Resumen` — tabla `wp_msp_resumenes`, correlativo por día (`RC-20260818-1`) con el mismo patrón de índice único que los correlativos de boleta, y `dias_de_plazo()`.
 
-**Roadmap de facturación** (plan completo: `PLAN-BOLETAS.md` en la carpeta del cliente): F1 base ✓ · F2 Greenter + emisión ✓ · F3 cola/reintentos/pantalla Comprobantes ✓ · F4 anulaciones (resumen diario) ✓ · F5 ticket con QR + PDF.
+### MSP_Ticket (Fase 5 de boletas — v1.11.0)
+Lo que SUNAT tiene es el XML; lo que el cliente se lleva es el papel. Se sirve por `admin-post.php` (acción `msp_ticket`, con nonce), y puede imprimirlo el **cajero**, que es quien lo entrega.
+
+- `cadena_qr( $c )` — la cadena del QR, compuesta a mano campo por campo porque SUNAT no da helper: `RUC|03|serie|correlativo|IGV|total|fecha|tipoDocCliente|nroDocCliente|hash`. Un campo de más o de menos y el verificador de SUNAT no reconoce el comprobante.
+- `qr_svg( $texto )` — QR en **SVG** con `chillerlan/php-qrcode`: no depende de GD ni Imagick (faltan en muchos hostings), imprime nítido a cualquier tamaño y viaja dentro del HTML.
+- **Si el comprobante aún no tiene `hash`** (reservado pero no confirmado por SUNAT) el ticket **no pinta el QR** y lo dice: un QR sin el hash de la firma da un código que el verificador no reconoce, y eso es peor que no ponerlo — el cliente creería tener algo comprobable.
+- Fuera de producción el ticket lleva impreso *«DOCUMENTO DE PRUEBA — SIN VALOR»*.
+- **El PDF lo hace el navegador.** La página está maquetada a 80 mm con `@page size: 80mm auto`; el navegador la manda a la térmica o la guarda como PDF. Meter una librería de PDF —o el binario descontinuado de wkhtmltopdf— sería cargar megas y una dependencia frágil para lo que el navegador ya hace bien.
+
+**Roadmap de facturación** (plan completo: `PLAN-BOLETAS.md` en la carpeta del cliente): F1 base ✓ · F2 Greenter + emisión ✓ · F3 cola/reintentos/pantalla Comprobantes ✓ · F4 anulaciones (resumen diario) ✓ · F5 ticket con QR ✓. **Módulo de facturación completo.**
 
 ---
 

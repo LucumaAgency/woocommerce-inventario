@@ -406,6 +406,12 @@ class MSP_Comprobantes {
 										<?php esc_html_e( 'Reintentar', 'multisede-pos' ); ?>
 									</a>
 								<?php endif; ?>
+								<?php if ( 'aceptado' === $c['estado'] ) : ?>
+									<a class="button button-small button-primary" target="_blank" rel="noopener"
+										href="<?php echo esc_url( MSP_Ticket::url( $c['id'] ) ); ?>">
+										<?php esc_html_e( 'Ticket', 'multisede-pos' ); ?>
+									</a>
+								<?php endif; ?>
 								<?php if ( $c['xml_path'] ) : ?>
 									<a class="button button-small" href="<?php echo esc_url( $this->url_accion( 'descargar', $c['id'], array( 'tipo' => 'xml' ) ) ); ?>">XML</a>
 								<?php endif; ?>

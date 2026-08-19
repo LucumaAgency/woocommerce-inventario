@@ -121,6 +121,7 @@ class MSP_POS {
 					'confirmar'      => __( '¿Cobrar esta venta?', 'multisede-pos' ),
 					'vacio'          => __( 'Agrega productos al ticket.', 'multisede-pos' ),
 					'error'          => __( 'Ocurrió un error. Inténtalo de nuevo.', 'multisede-pos' ),
+					'imprimir'       => __( 'Imprimir ticket', 'multisede-pos' ),
 					'vuelto'         => __( 'Vuelto', 'multisede-pos' ),
 					'dni_requerido'  => sprintf(
 						/* translators: %s: importe límite. */
@@ -481,10 +482,20 @@ class MSP_POS {
 		 */
 		do_action( 'msp_pos_venta_creada', $order, $metodo, $sede_id );
 
+		// Si la venta generó comprobante, se ofrece el ticket al cajero en el
+		// acto: es el momento en que el cliente sigue delante del mostrador.
+		$ticket_url = '';
+		$comprobante = MSP_Comprobante::obtener_por_pedido( $order->get_id() );
+		if ( $comprobante ) {
+			$ticket_url = MSP_Ticket::url( (int) $comprobante['id'] );
+		}
+
 		wp_send_json_success(
 			array(
 				'pedido' => $order->get_order_number(),
 				'total'  => (float) $order->get_total(),
+				'ticket' => $ticket_url,
+				'boleta' => $comprobante ? MSP_Comprobante::numero( $comprobante ) : '',
 				'msg'    => sprintf(
 					/* translators: %s: número de pedido. */
 					__( 'Venta registrada. Pedido #%s.', 'multisede-pos' ),

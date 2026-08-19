@@ -5,7 +5,9 @@
     "license": "GPL-2.0-or-later",
     "require": {
         "php": ">=7.4",
-        "greenter/lite": "5.1.1"
+        "greenter/lite": "5.1.1",
+        "chillerlan/php-qrcode": "^4.3",
+        "chillerlan/php-settings-container": "^2.1.6"
     },
     "config": {
         "platform": {

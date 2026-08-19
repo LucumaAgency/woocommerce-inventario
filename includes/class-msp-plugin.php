@@ -62,6 +62,11 @@ class MSP_Plugin {
 		$baja = new MSP_Baja();
 		$baja->init();
 
+		// Ticket imprimible (Fase 5). Fuera del bloque de admin: lo sirve
+		// admin-post, y quien más lo usa es el cajero.
+		$ticket = new MSP_Ticket();
+		$ticket->init();
+
 		// Pantallas de solo-admin: inventario, asistente y ayuda.
 		if ( is_admin() ) {
 			$comprobantes = new MSP_Comprobantes();

@@ -237,7 +237,13 @@
 			}
 		).done( function ( resp ) {
 			if ( resp.success ) {
-				$msg.html( '<span class="ok">' + resp.data.msg + '</span>' );
+				var html = '<span class="ok">' + resp.data.msg + '</span>';
+				if ( resp.data.ticket ) {
+					html += ' <a class="button button-primary" target="_blank" rel="noopener" href="' +
+						resp.data.ticket + '">' + mspPOS.i18n.imprimir +
+						( resp.data.boleta ? ' (' + resp.data.boleta + ')' : '' ) + '</a>';
+				}
+				$msg.html( html );
 				ticket = {};
 				pintarTicket();
 				$( '#msp-pos-recibido' ).val( '' );

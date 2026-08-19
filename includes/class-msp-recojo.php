@@ -26,17 +26,25 @@ class MSP_Recojo {
 	public function init() {
 		// Campo de sede en el checkout clásico.
 		//
-		// Va ARRIBA del todo, antes de los datos de facturación: dónde recoges y
-		// el DNI de tu boleta son decisiones, no un apéndice. Colgado del final
-		// (después de las notas del pedido) el DNI quedaba donde menos se ve,
-		// justo cuando es obligatorio y bloquea la compra.
+		// Va DENTRO del formulario de facturación, encabezándolo. Antes colgaba
+		// de `woocommerce_checkout_before_customer_details`, que renderiza fuera
+		// del contenedor `#customer_details`: los temas que maquetan el checkout
+		// a dos columnas lo tomaban como una celda más y el bloque acababa al
+		// lado de "Detalles de facturación" en vez de encima. Aquí dentro, el
+		// tema lo coloca solo, en la columna que le toca.
 		//
-		// El hook es filtrable por si un tema o constructor coloca sus secciones
-		// de otra forma y hace falta moverlo sin tocar el plugin.
+		// El hook es filtrable por si un constructor ordena sus secciones de otra
+		// forma. Ojo al cambiarlo: cada hook del checkout tiene su propia firma y
+		// unos pasan el objeto WC_Checkout y otros no (ver `campo_checkout`).
 		add_action(
-			apply_filters( 'msp_recojo_hook_checkout', 'woocommerce_checkout_before_customer_details' ),
+			apply_filters( 'msp_recojo_hook_checkout', 'woocommerce_before_checkout_billing_form' ),
 			array( $this, 'campo_checkout' )
 		);
+
+		// El DNI es un campo NATIVO del checkout, no uno suelto: así lo coloca
+		// WooCommerce dentro de "Detalles de facturación", con la maquetación del
+		// tema, y viaja al pedido como cualquier otro campo de facturación.
+		add_filter( 'woocommerce_checkout_fields', array( $this, 'registrar_campo_dni' ), 20 );
 		add_action( 'woocommerce_checkout_process', array( $this, 'validar_checkout' ) );
 		add_action( 'woocommerce_checkout_create_order', array( $this, 'guardar_sede_pedido' ), 10, 2 );
 
@@ -96,7 +104,6 @@ class MSP_Recojo {
 			}
 			echo '</p>';
 			echo '<input type="hidden" name="msp_sede_recojo" value="' . esc_attr( $sede_activa ) . '" />';
-			$this->campo_dni( $checkout );
 			echo '</div>';
 			return;
 		}
@@ -123,46 +130,45 @@ class MSP_Recojo {
 			$checkout->get_value( 'msp_sede_recojo' )
 		);
 
-		$this->campo_dni( $checkout );
 		echo '</div>';
 	}
 
 	/**
-	 * Campo de DNI para la boleta electrónica.
+	 * Añade el DNI a los campos de facturación del checkout.
 	 *
-	 * Solo aparece si la emisión automática está encendida: mientras no se
-	 * emita, pedir un documento sería pedir un dato que no se usa. Se marca
-	 * obligatorio cuando el carrito supera el límite de SUNAT.
+	 * Se pide **siempre**, no solo por encima del límite de SUNAT: los couriers
+	 * lo exigen para la entrega, y pedirlo unas veces sí y otras no según el
+	 * importe del carrito confunde más de lo que ahorra.
 	 *
-	 * @param WC_Checkout $checkout Objeto del checkout.
+	 * Va como campo nativo y no como input suelto para que WooCommerce lo
+	 * coloque dentro de "Detalles de facturación", con la maquetación del tema.
+	 *
+	 * @param array $campos Campos del checkout.
+	 * @return array
 	 */
-	private function campo_dni( $checkout ) {
-		if ( ! $checkout instanceof WC_Checkout ) {
-			return;
+	public function registrar_campo_dni( $campos ) {
+		// Si otro plugin ya puso su campo de DNI, no se añade nada: sería el
+		// mismo dato pedido dos veces, y el cliente no sabría cuál llenar.
+		if ( isset( $campos['billing']['billing_dni'] ) ) {
+			return $campos;
 		}
 
-		// Si el checkout ya tiene un campo de DNI puesto por otro plugin, se usa
-		// ese. Dos inputs pidiendo el mismo documento es peor que ninguno: el
-		// cliente no sabe cuál llenar y acaba poniéndolo en uno solo.
-		if ( self::campo_dni_ajeno() ) {
-			return;
-		}
-
-		woocommerce_form_field(
-			'msp_dni',
-			array(
-				'type'              => 'text',
-				'required'          => true,
-				'class'             => array( 'form-row-wide' ),
-				'label'             => __( 'DNI', 'multisede-pos' ),
-				'description'       => __( 'Lo necesitamos para tu boleta y para la entrega.', 'multisede-pos' ),
-				'custom_attributes' => array(
-					'inputmode' => 'numeric',
-					'maxlength' => '8',
-				),
+		// Prioridad 25: entre el teléfono (20) y el correo (30). Los datos de
+		// contacto van juntos y el documento pertenece a ese grupo.
+		$campos['billing']['billing_dni'] = array(
+			'type'              => 'text',
+			'label'             => __( 'DNI', 'multisede-pos' ),
+			'placeholder'       => __( '8 dígitos', 'multisede-pos' ),
+			'required'          => true,
+			'class'             => array( 'form-row-wide' ),
+			'priority'          => 25,
+			'custom_attributes' => array(
+				'inputmode' => 'numeric',
+				'maxlength' => '8',
 			),
-			$checkout->get_value( 'msp_dni' )
 		);
+
+		return $campos;
 	}
 
 	/**
@@ -175,13 +181,10 @@ class MSP_Recojo {
 	 * @return string Nombre del campo, o cadena vacía.
 	 */
 	public static function campo_dni_ajeno() {
-		if ( ! function_exists( 'WC' ) || ! WC()->checkout() ) {
-			return '';
-		}
-
-		$campos = WC()->checkout()->get_checkout_fields( 'billing' );
-
-		return isset( $campos['billing_dni'] ) ? 'billing_dni' : '';
+		// El plugin de checkout peruano de Lucuma (el de Vaporis) trae su propio
+		// `billing_dni` con su validación. Si está, valida él y nosotros solo
+		// leemos el dato.
+		return defined( 'VAPORIS_CHECKOUT_PE_DIR' );
 	}
 
 	/**

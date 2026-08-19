@@ -606,9 +606,20 @@ class MSP_Emisor {
 
 		$zona = new DateTimeZone( wp_timezone_string() );
 
+		// ⚠️ Los dos campos de Greenter van al revés de lo que sugiere su nombre.
+		// En la plantilla UBL:
+		//
+		//   <cbc:ReferenceDate> ← fecGeneracion  → fecha de EMISIÓN de las boletas
+		//   <cbc:IssueDate>     ← fecResumen     → fecha en que se GENERA el resumen
+		//
+		// Puestos "como suenan", el XML declara un resumen generado antes que los
+		// documentos que informa, y SUNAT lo rechaza con el error 2671. Solo se
+		// nota al comunicar la baja de una boleta de un día anterior: mientras
+		// emisión y resumen caen el mismo día, las dos fechas coinciden y el
+		// error no aparece.
 		return ( new \Greenter\Model\Summary\Summary() )
-			->setFecGeneracion( new DateTime( 'now', $zona ) )
-			->setFecResumen( new DateTime( $r['fecha_referencia'], $zona ) )
+			->setFecGeneracion( new DateTime( $r['fecha_referencia'], $zona ) )
+			->setFecResumen( new DateTime( 'now', $zona ) )
 			->setCorrelativo( (string) (int) $r['correlativo'] )
 			->setMoneda( 'PEN' )
 			->setCompany( $empresa )

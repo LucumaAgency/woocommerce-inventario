@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.16.0
+- **Versión actual:** 1.16.1
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 

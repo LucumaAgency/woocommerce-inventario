@@ -42,12 +42,11 @@ class MSP_Resumen {
 	}
 
 	/**
-	 * Crea el resumen de una fecha, con su correlativo del día.
+	 * Crea el resumen de un día de emisión, con su correlativo.
 	 *
-	 * El identificador es `RC-20260818-1`: tipo, fecha de los comprobantes que
-	 * se comunican, y un número que empieza en 1 cada día. Si en un mismo día
-	 * hay que enviar dos resúmenes de la misma fecha (porque se anularon más
-	 * ventas después del primero), el segundo es el `-2`.
+	 * El identificador es `RC-20260819-2`: tipo, **fecha en que se genera** el
+	 * resumen y un número que empieza en 1 cada día. La fecha de las boletas que
+	 * informa es otra cosa y vive en `fecha_referencia`.
 	 *
 	 * @param string $fecha Fecha de emisión de los comprobantes (Y-m-d).
 	 * @return array|WP_Error Fila creada.
@@ -59,19 +58,28 @@ class MSP_Resumen {
 		$tabla   = self::tabla();
 		$fecha   = gmdate( 'Y-m-d', strtotime( $fecha ) );
 
-		// Igual que con los correlativos de boleta: se calcula el siguiente y se
-		// deja que el índice único rechace el choque, en vez de confiar en un
-		// SELECT MAX() suelto.
+		// El identificador lleva la fecha en que se GENERA el resumen (hoy), no
+		// la de las boletas que informa. Es lo que arma Greenter en `getXmlId()`
+		// y por tanto el nombre real del documento ante SUNAT: si aquí
+		// guardáramos la fecha de las boletas, el número de la pantalla no
+		// coincidiría con el del archivo enviado. La fecha de las boletas vive
+		// en `fecha_referencia`, que es lo que agrupa.
+		//
+		// Por lo mismo, el correlativo es del DÍA DE GENERACIÓN: dos resúmenes
+		// creados hoy —uno de boletas de hoy y otro de ayer— son el 1 y el 2 de
+		// hoy, no dos "número 1" de días distintos.
+		$hoy = gmdate( 'Ymd', strtotime( current_time( 'mysql' ) ) );
+
 		for ( $intento = 0; $intento < 20; $intento++ ) {
 			$max = (int) $wpdb->get_var(
 				$wpdb->prepare(
-					"SELECT MAX(correlativo) FROM {$tabla} WHERE entorno = %s AND fecha_referencia = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					"SELECT MAX(correlativo) FROM {$tabla} WHERE entorno = %s AND identificador LIKE %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 					$entorno,
-					$fecha
+					'RC-' . $hoy . '-%'
 				)
 			);
 			$correlativo   = $max + 1;
-			$identificador = sprintf( 'RC-%s-%d', gmdate( 'Ymd', strtotime( $fecha ) ), $correlativo );
+			$identificador = sprintf( 'RC-%s-%d', $hoy, $correlativo );
 
 			$suprimir = $wpdb->suppress_errors( true );
 			$ok       = $wpdb->insert(

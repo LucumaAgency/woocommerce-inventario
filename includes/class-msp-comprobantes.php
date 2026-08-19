@@ -68,7 +68,26 @@ class MSP_Comprobantes {
 
 		$aviso = '';
 
-		if ( 'reintentar' === $accion ) {
+		if ( 'rehacer_baja' === $accion ) {
+			$c = MSP_Comprobante::obtener( $id );
+			if ( ! $c ) {
+				$aviso = __( 'Ese comprobante no existe.', 'multisede-pos' );
+			} elseif ( 'rechazada' !== $c['baja_estado'] ) {
+				$aviso = __( 'Esa baja no está rechazada.', 'multisede-pos' );
+			} else {
+				// Vuelve a la cola de bajas para entrar en un resumen NUEVO. El
+				// anterior queda como estaba: un resumen rechazado por SUNAT no
+				// se reenvía con el mismo número, se sustituye por otro.
+				MSP_Comprobante::actualizar(
+					$id,
+					array(
+						'baja_estado' => 'pendiente',
+						'resumen_id'  => 0,
+					)
+				);
+				$aviso = __( 'La baja vuelve a la cola. Pulsa "Procesar todo ahora" en Pruebas, o espera al barrido.', 'multisede-pos' );
+			}
+		} elseif ( 'reintentar' === $accion ) {
 			$c = MSP_Comprobante::obtener( $id );
 			if ( ! $c ) {
 				$aviso = __( 'Ese comprobante no existe.', 'multisede-pos' );
@@ -404,6 +423,11 @@ class MSP_Comprobantes {
 								<?php if ( 'aceptado' !== $c['estado'] ) : ?>
 									<a class="button button-small" href="<?php echo esc_url( $this->url_accion( 'reintentar', $c['id'] ) ); ?>">
 										<?php esc_html_e( 'Reintentar', 'multisede-pos' ); ?>
+									</a>
+								<?php endif; ?>
+								<?php if ( 'rechazada' === $c['baja_estado'] ) : ?>
+									<a class="button button-small" href="<?php echo esc_url( $this->url_accion( 'rehacer_baja', $c['id'] ) ); ?>">
+										<?php esc_html_e( 'Rehacer baja', 'multisede-pos' ); ?>
 									</a>
 								<?php endif; ?>
 								<?php if ( 'aceptado' === $c['estado'] ) : ?>

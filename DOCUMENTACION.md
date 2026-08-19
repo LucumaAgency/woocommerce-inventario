@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.9.4
+- **Versión actual:** 1.9.5
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -413,6 +413,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.7.0** | **Boletas Fase 1** — tabla `wp_msp_comprobantes`, reserva de correlativo a prueba de carreras, serie de boleta por sede (`_msp_serie_boleta`). Base de facturación electrónica; aún no emite |
 | **1.7.1 – 1.7.5** | Correcciones del recorrido de verificación: acceso del personal de tienda al panel, stock que no llegaba a Woo, egresos mayores que el efectivo del cajón, recuperación de capacidades del admin y menú Sedes |
 | **1.8.0** | **Boletas Fase 2** — motor de emisión con Greenter: XML UBL, firma, envío SOAP a SUNAT, CDR y conservación de archivos. Pantalla de Facturación con emisión de prueba |
+| **1.9.5** | Los fallos previos al envío (certificado ausente o ilegible, Greenter a medias) quedan registrados en el comprobante en vez de dejarlo «En cola» sin motivo, e interruptor **Simular fallo de envío** para poder ejercitar la cola de reintentos: el sandbox de SUNAT no valida la clave SOL, así que un envío nunca falla ahí por credenciales |
 | **1.9.4** | El bloque de recojo y el DNI suben al principio del checkout (hook filtrable con `msp_recojo_hook_checkout`), y los archivos conservados se nombran con el correlativo completo |
 | **1.9.3** | Sobre S/ 700 la boleta exige **DNI y nombre**, no solo el documento: una boleta de S/ 900 con DNI real a nombre de «CLIENTE VARIOS» es contradictoria y así saldría impresa |
 | **1.9.2** | El correlativo va al XML con 8 dígitos (`B001-00000002`, no `B001-2`): el número registrado en SUNAT coincide con el del panel y el del ticket |

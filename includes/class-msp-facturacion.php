@@ -66,6 +66,7 @@ class MSP_Facturacion {
 			$nuevos['entorno'] = 'produccion' === $nuevos['entorno'] ? 'produccion' : 'beta';
 
 			$nuevos['emision_automatica'] = ! empty( $_POST['emision_automatica'] ) ? 1 : 0;
+			$nuevos['simular_fallo']      = ! empty( $_POST['simular_fallo'] ) ? 1 : 0;
 			update_option( self::opcion(), $nuevos );
 			$aviso = 'guardado';
 
@@ -170,6 +171,13 @@ class MSP_Facturacion {
 				</p></div>
 			<?php endif; ?>
 
+			<?php if ( ! empty( $a['simular_fallo'] ) && ! MSP_Emisor::es_produccion() ) : ?>
+				<div class="notice notice-warning"><p>
+					<strong><?php esc_html_e( 'Fallo de envío simulado: ACTIVO.', 'multisede-pos' ); ?></strong>
+					<?php esc_html_e( 'Ningún comprobante llegará a SUNAT mientras esté encendido. Apágalo al terminar de probar.', 'multisede-pos' ); ?>
+				</p></div>
+			<?php endif; ?>
+
 			<?php if ( MSP_Emisor::es_produccion() ) : ?>
 				<div class="notice notice-warning"><p>
 					<strong><?php esc_html_e( 'Entorno de PRODUCCIÓN.', 'multisede-pos' ); ?></strong>
@@ -245,6 +253,20 @@ class MSP_Facturacion {
 							</p>
 						</td>
 					</tr>
+					<?php if ( ! MSP_Emisor::es_produccion() ) : ?>
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Simular fallo de envío', 'multisede-pos' ); ?></th>
+							<td>
+								<label>
+									<input type="checkbox" name="simular_fallo" value="1" <?php checked( ! empty( $a['simular_fallo'] ) ); ?> />
+									<?php esc_html_e( 'Hacer que los envíos fallen a propósito', 'multisede-pos' ); ?>
+								</label>
+								<p class="description">
+									<?php esc_html_e( 'Solo para probar la cola de reintentos. El sandbox de SUNAT acepta cualquier clave SOL, así que es la única forma de ver qué pasa cuando el envío falla. Se ignora en producción; acuérdate de apagarlo igual.', 'multisede-pos' ); ?>
+								</p>
+							</td>
+						</tr>
+					<?php endif; ?>
 					<tr>
 						<th scope="row"><label for="cert_path"><?php esc_html_e( 'Ruta del certificado PEM', 'multisede-pos' ); ?></label></th>
 						<td>
@@ -259,7 +281,11 @@ class MSP_Facturacion {
 						<td>
 							<input type="text" name="sol_usuario" value="<?php echo esc_attr( $a['sol_usuario'] ); ?>" placeholder="<?php esc_attr_e( 'usuario secundario', 'multisede-pos' ); ?>" />
 							<input type="password" name="sol_clave" value="<?php echo esc_attr( $a['sol_clave'] ); ?>" placeholder="<?php esc_attr_e( 'clave', 'multisede-pos' ); ?>" autocomplete="new-password" />
-							<p class="description"><?php esc_html_e( 'En beta: MODDATOS / moddatos. En producción, el usuario secundario de saraih.', 'multisede-pos' ); ?></p>
+							<p class="description">
+								<?php esc_html_e( 'En beta: MODDATOS / moddatos. En producción, el usuario secundario de saraih.', 'multisede-pos' ); ?>
+								<br><strong><?php esc_html_e( 'Ojo: el sandbox NO valida la clave.', 'multisede-pos' ); ?></strong>
+								<?php esc_html_e( 'Acepta cualquiera mientras el usuario sea MODDATOS, así que unas credenciales correctas en beta no demuestran nada. Las reales se estrenan con la primera boleta de producción: hay que vigilarla.', 'multisede-pos' ); ?>
+							</p>
 						</td>
 					</tr>
 					<tr>

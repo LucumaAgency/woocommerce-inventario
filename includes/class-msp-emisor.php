@@ -44,6 +44,9 @@ class MSP_Emisor {
 				// Apagada por defecto: encender esto hace que cada venta real
 				// consuma numeración. Es una decisión, no un valor por defecto.
 				'emision_automatica' => 0,
+				// Interruptor de pruebas: hace fallar el envío a propósito para
+				// ejercitar la cola de reintentos. Se ignora en producción.
+				'simular_fallo'      => 0,
 				'cert_path'     => '',
 				'sol_usuario'   => 'MODDATOS',
 				'sol_clave'     => 'moddatos',
@@ -185,12 +188,27 @@ class MSP_Emisor {
 
 		$see = self::see();
 		if ( is_wp_error( $see ) ) {
-			return $see;
+			return self::anotar_fallo( $comprobante_id, $see );
 		}
 
 		$invoice = self::armar( $c );
 		if ( is_wp_error( $invoice ) ) {
-			return $invoice;
+			return self::anotar_fallo( $comprobante_id, $invoice );
+		}
+
+		// Fallo simulado, solo fuera de producción: es la única forma de
+		// ejercitar la cola de reintentos antes de que exista una venta real.
+		// El sandbox de SUNAT no sirve para provocarlo: acepta cualquier clave
+		// SOL mientras el usuario sea MODDATOS, así que un envío nunca falla ahí
+		// por credenciales.
+		if ( ! empty( self::ajustes()['simular_fallo'] ) && ! self::es_produccion() ) {
+			return self::anotar_fallo(
+				$comprobante_id,
+				new WP_Error(
+					'msp_fallo_simulado',
+					__( 'Fallo de envío simulado (interruptor de pruebas activo en Facturación).', 'multisede-pos' )
+				)
+			);
 		}
 
 		try {
@@ -244,6 +262,30 @@ class MSP_Emisor {
 		MSP_Comprobante::actualizar( $comprobante_id, $datos );
 
 		return MSP_Comprobante::obtener( $comprobante_id );
+	}
+
+	/**
+	 * Deja constancia de un fallo ocurrido ANTES de enviar.
+	 *
+	 * Sin esto, un problema de configuración —certificado ausente, ilegible, o
+	 * Greenter a medias— devolvía el error a quien llamara pero no tocaba la
+	 * fila: el comprobante se quedaba "En cola" para siempre, sin motivo visible
+	 * en pantalla, mientras la cola lo reintentaba en silencio. Quien mirara la
+	 * pantalla no tenía forma de saber qué arreglar.
+	 *
+	 * @param int      $comprobante_id ID del comprobante.
+	 * @param WP_Error $error          Error ocurrido.
+	 * @return WP_Error El mismo error, para poder devolverlo en cadena.
+	 */
+	private static function anotar_fallo( $comprobante_id, $error ) {
+		MSP_Comprobante::actualizar(
+			$comprobante_id,
+			array(
+				'estado'       => 'error',
+				'ultimo_error' => substr( $error->get_error_message(), 0, 1000 ),
+			)
+		);
+		return $error;
 	}
 
 	/**

@@ -74,6 +74,16 @@ class MSP_Comprobantes {
 				$aviso = __( 'Ese comprobante no existe.', 'multisede-pos' );
 			} elseif ( 'aceptado' === $c['estado'] ) {
 				$aviso = __( 'Ya está aceptado: no hay nada que reintentar.', 'multisede-pos' );
+			} elseif ( $c['entorno'] !== MSP_Comprobante::entorno_actual() ) {
+				// Se comprueba ANTES de tocar el estado: si no, la fila pasaría a
+				// "En cola" para nada y quien mirara la pantalla no entendería por
+				// qué su reintento no hizo nada.
+				$aviso = sprintf(
+					/* translators: 1: entorno del comprobante, 2: entorno activo. */
+					__( 'No se envía: ese comprobante es de %1$s y el sitio está ahora en %2$s. Emitirlo desde aquí sería mandar a SUNAT un documento que pertenece a otro entorno.', 'multisede-pos' ),
+					strtoupper( $c['entorno'] ),
+					strtoupper( MSP_Comprobante::entorno_actual() )
+				);
 			} else {
 				// Un rechazado vuelve a "pendiente" antes de reintentar: si no,
 				// MSP_Cola::procesar lo daría por caso cerrado y no lo enviaría.

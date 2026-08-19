@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.15.1
+- **Versión actual:** 1.16.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -278,6 +278,14 @@ Añade los campos de stock por sede en la pestaña **Inventario** del producto (
 - Registra automáticamente las ventas POS en efectivo (vía `msp_pos_venta_creada`).
 - Cierre con **arqueo**: esperado (`apertura + ingresos + ventas − egresos`) vs contado → diferencia.
 - Reporte de cierres recientes por sede.
+
+### MSP_Pruebas (v1.16.0)
+`Caja → Pruebas`, **solo fuera de producción** y con `manage_options`. Existe porque probar el módulo a mano se iba en dos cosas ajenas al sistema: ir a *Acciones programadas* a empujar la cola, y montar la situación previa de cada caso.
+
+- **Procesar todo ahora** — envía los comprobantes pendientes, agrupa las bajas marcadas y consulta los tickets de los resúmenes, en el acto. **También sirve en producción** cuando algo se atasca, sin entrar a la pantalla de acciones de WooCommerce.
+- **Generadores de escenario** — venta con boleta aceptada, venta atascada (enciende el simulador solo durante el envío y lo devuelve a como estaba), venta fechada ayer (mueve `emitido_at`, que es lo que agrupa las bajas) y producto con 1 unidad.
+
+En producción **ni se registra el menú**: un botón que fabrica ventas falsas no debe estar al alcance de nadie en la tienda real.
 
 ### MSP_Entregas (v1.13.0)
 `Entregas`, menú propio, con `msp_usar_pos`. Lista los pedidos **web pendientes de recojo** de las sedes del usuario, con una sola acción: **Entregar**.

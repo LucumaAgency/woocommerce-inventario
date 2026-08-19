@@ -84,6 +84,10 @@ class MSP_Plugin {
 			$entregas = new MSP_Entregas();
 			$entregas->init();
 
+			// Banco de pruebas: solo se registra fuera de producción.
+			$pruebas = new MSP_Pruebas();
+			$pruebas->init();
+
 			$inventario = new MSP_Inventario();
 			$inventario->init();
 

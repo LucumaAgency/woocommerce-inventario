@@ -72,6 +72,9 @@ class MSP_Plugin {
 			$comprobantes = new MSP_Comprobantes();
 			$comprobantes->init();
 
+			$cajas_abiertas = new MSP_Cajas_Abiertas();
+			$cajas_abiertas->init();
+
 			$inventario = new MSP_Inventario();
 			$inventario->init();
 

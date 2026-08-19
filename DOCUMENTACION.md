@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.11.0
+- **Versión actual:** 1.12.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -277,6 +277,13 @@ Añade los campos de stock por sede en la pestaña **Inventario** del producto (
 - Registra automáticamente las ventas POS en efectivo (vía `msp_pos_venta_creada`).
 - Cierre con **arqueo**: esperado (`apertura + ingresos + ventas − egresos`) vs contado → diferencia.
 - Reporte de cierres recientes por sede.
+
+### MSP_Cajas_Abiertas (v1.12.0)
+`Caja → Cajas abiertas`, con `msp_ver_reportes`. Lista los turnos **abiertos ahora mismo** en todas las sedes, con cajero, hora de apertura, tiempo transcurrido, monto de apertura, ventas en efectivo, ingresos/egresos y el **efectivo esperado** en cada cajón, más el total en mostrador.
+
+Existe porque la pantalla de Caja es **personal** (consulta la sesión del usuario que la mira, también si es admin) y el historial solo muestra turnos **ya cerrados**: no había forma de supervisar lo que está pasando ahora. Un descuadre se aclara mejor mientras la persona sigue en el mostrador que al día siguiente.
+
+Reutiliza `MSP_Caja::totales()` y `MSP_Caja::esperado()` en vez de recalcular. Excluye las cajas de **práctica** del asistente: no son dinero real y mezclarlas haría dudar de la cifra.
 
 ### MSP_Inventario
 Pantalla **Inventario** (capacidad `msp_ver_stock`; ajustar requiere `msp_gestionar_stock`). Muestra, para la sede elegida, el stock, lo reservado y lo disponible de cada producto, con buscador por nombre o SKU y paginación. Los productos variables se listan con una fila por variación. El ajuste es **absoluto** (se escribe el total que hay, no lo que entró) y sincroniza el espejo de Woo. Existe para que el gerente gestione inventario sin permisos sobre el catálogo.

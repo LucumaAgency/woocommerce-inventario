@@ -242,58 +242,80 @@
 				items: JSON.stringify( items )
 			}
 		).done( function ( resp ) {
-			if ( resp.success ) {
-				var html = '<span class="ok">' + resp.data.msg + '</span>';
-				if ( resp.data.ticket ) {
-					html += ' <a class="button button-primary" target="_blank" rel="noopener" href="' +
-						resp.data.ticket + '">' + mspPOS.i18n.imprimir +
-						( resp.data.boleta ? ' (' + resp.data.boleta + ')' : '' ) + '</a>';
-				}
-				$msg.html( html );
-				ticket = {};
-				pintarTicket();
-				$( '#msp-pos-recibido' ).val( '' );
-				$( '#msp-pos-dni' ).val( '' );
-				$( '#msp-pos-cliente-nombre' ).val( '' );
-				$( '#msp-pos-dni-aviso' ).text( '' );
-				$( '#msp-pos-buscar' ).val( '' );
-				$( '#msp-pos-resultados' ).empty();
-			} else if ( resp.data && resp.data.sin_caja ) {
-				// Cobro en efectivo sin caja abierta: se ofrece abrirla aquí
-				// mismo en vez de mandar al cajero a otra pantalla con el
-				// ticket a medias y un cliente esperando.
-				$msg.html( '<span class="err">' + resp.data.msg + '</span>' );
-				var apertura = window.prompt( mspPOS.i18n.abrir_caja, '0' );
-				if ( null === apertura ) {
-					return;
-				}
-				$msg.html( mspPOS.i18n.abriendo );
-				$.post(
-					mspPOS.ajaxurl,
-					{
-						action: 'msp_pos_abrir_caja',
-						nonce: mspPOS.nonce,
-						sede: $( '#msp-pos-sede' ).val(),
-						apertura: parseFloat( apertura ) || 0
-					}
-				).done( function ( r2 ) {
-					if ( r2.success ) {
-						$msg.html( '<span class="ok">' + r2.data.msg + '</span>' );
-						cobrar( $btn, $msg, items, dni );
-					} else {
-						$msg.html( '<span class="err">' + ( r2.data && r2.data.msg ? r2.data.msg : mspPOS.i18n.error ) + '</span>' );
-					}
-				} ).fail( function () {
-					$msg.html( '<span class="err">' + mspPOS.i18n.error + '</span>' );
-				} );
-			} else {
-				$msg.html( '<span class="err">' + ( resp.data && resp.data.msg ? resp.data.msg : mspPOS.i18n.error ) + '</span>' );
+			manejarRespuesta( resp, $btn, $msg, items, dni );
+		} ).fail( function ( jqXHR ) {
+			// Los errores del servidor viajan con estado HTTP 4xx (400, 403,
+			// 409), y jQuery manda cualquier 4xx aquí, no a done(). El cuerpo
+			// sigue siendo el JSON de wp_send_json_error, así que hay que
+			// leerlo: sin esto, TODO error específico del POS —sin stock, sede
+			// no válida, falta el DNI, no hay caja abierta— se veía como un
+			// "ocurrió un error" genérico.
+			if ( jqXHR && jqXHR.responseJSON ) {
+				manejarRespuesta( jqXHR.responseJSON, $btn, $msg, items, dni );
+				return;
 			}
-		} ).fail( function () {
 			$msg.html( '<span class="err">' + mspPOS.i18n.error + '</span>' );
 		} ).always( function () {
 			$btn.prop( 'disabled', false );
 		} );
+	}
+
+	// Interpreta la respuesta del cobro, venga de done() o de fail().
+	function manejarRespuesta( resp, $btn, $msg, items, dni ) {
+		if ( resp.success ) {
+			var html = '<span class="ok">' + resp.data.msg + '</span>';
+			if ( resp.data.ticket ) {
+				html += ' <a class="button button-primary" target="_blank" rel="noopener" href="' +
+					resp.data.ticket + '">' + mspPOS.i18n.imprimir +
+					( resp.data.boleta ? ' (' + resp.data.boleta + ')' : '' ) + '</a>';
+			}
+			$msg.html( html );
+			ticket = {};
+			pintarTicket();
+			$( '#msp-pos-recibido' ).val( '' );
+			$( '#msp-pos-dni' ).val( '' );
+			$( '#msp-pos-cliente-nombre' ).val( '' );
+			$( '#msp-pos-dni-aviso' ).text( '' );
+			$( '#msp-pos-buscar' ).val( '' );
+			$( '#msp-pos-resultados' ).empty();
+			return;
+		}
+
+		if ( resp.data && resp.data.sin_caja ) {
+			// Cobro en efectivo sin caja abierta: se ofrece abrirla aquí mismo
+			// en vez de mandar al cajero a otra pantalla con el ticket a medias
+			// y un cliente esperando.
+			$msg.html( '<span class="err">' + resp.data.msg + '</span>' );
+			var apertura = window.prompt( mspPOS.i18n.abrir_caja, '0' );
+			if ( null === apertura ) {
+				return;
+			}
+			$msg.html( mspPOS.i18n.abriendo );
+			$.post(
+				mspPOS.ajaxurl,
+				{
+					action: 'msp_pos_abrir_caja',
+					nonce: mspPOS.nonce,
+					sede: $( '#msp-pos-sede' ).val(),
+					apertura: parseFloat( apertura ) || 0
+				}
+			).done( function ( r2 ) {
+				if ( r2.success ) {
+					$msg.html( '<span class="ok">' + r2.data.msg + '</span>' );
+					cobrar( $btn, $msg, items, dni );
+				} else {
+					$msg.html( '<span class="err">' + ( r2.data && r2.data.msg ? r2.data.msg : mspPOS.i18n.error ) + '</span>' );
+				}
+			} ).fail( function ( x2 ) {
+				var m = ( x2 && x2.responseJSON && x2.responseJSON.data && x2.responseJSON.data.msg )
+					? x2.responseJSON.data.msg
+					: mspPOS.i18n.error;
+				$msg.html( '<span class="err">' + m + '</span>' );
+			} );
+			return;
+		}
+
+		$msg.html( '<span class="err">' + ( resp.data && resp.data.msg ? resp.data.msg : mspPOS.i18n.error ) + '</span>' );
 	}
 
 	// Estado inicial.

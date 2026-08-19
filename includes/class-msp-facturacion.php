@@ -70,6 +70,10 @@ class MSP_Facturacion {
 			update_option( self::opcion(), $nuevos );
 			$aviso = 'guardado';
 
+		} elseif ( 'credenciales' === $accion ) {
+			$r     = MSP_Emisor::probar_credenciales();
+			$aviso = ( $r['ok'] ? '✅ ' : '⚠️ ' ) . $r['mensaje'];
+
 		} elseif ( 'probar' === $accion ) {
 			$sede_id = isset( $_POST['sede_prueba'] ) ? (int) $_POST['sede_prueba'] : 0;
 			$total   = isset( $_POST['total_prueba'] ) ? (float) wp_unslash( $_POST['total_prueba'] ) : 15.00;
@@ -308,6 +312,21 @@ class MSP_Facturacion {
 					</tr>
 				</table>
 				<?php submit_button( __( 'Guardar ajustes', 'multisede-pos' ) ); ?>
+			</form>
+
+			<hr>
+
+			<h2><?php esc_html_e( 'Probar las credenciales SOL', 'multisede-pos' ); ?></h2>
+			<p>
+				<?php esc_html_e( 'Comprueba que el usuario y la clave sirven, sin emitir nada: se envía a propósito un archivo que no es un comprobante, así que SUNAT solo puede objetar el contenido. No se consume numeración.', 'multisede-pos' ); ?>
+				<br><strong><?php esc_html_e( 'Solo sirve con el entorno en producción.', 'multisede-pos' ); ?></strong>
+				<?php esc_html_e( 'El sandbox acepta cualquier usuario y clave, incluso inventados, así que ahí esta prueba no demuestra nada.', 'multisede-pos' ); ?>
+				<br><?php esc_html_e( 'El día del estreno, hazla DOS veces: primero con la clave mal escrita a propósito (debe decir que son incorrectas) y luego con la buena. La primera comprueba que el detector funciona; la segunda, que las credenciales sirven.', 'multisede-pos' ); ?>
+			</p>
+			<form method="post">
+				<?php wp_nonce_field( 'msp_facturacion', 'msp_fact_nonce' ); ?>
+				<input type="hidden" name="msp_fact_action" value="credenciales" />
+				<?php submit_button( __( 'Probar credenciales', 'multisede-pos' ), 'secondary', 'submit', false ); ?>
 			</form>
 
 			<hr>

@@ -172,6 +172,157 @@ class MSP_Emisor {
 	}
 
 	/**
+	 * Comprueba las credenciales SOL sin emitir nada.
+	 *
+	 * El truco: se envía a propósito un archivo que NO es un comprobante. SUNAT
+	 * valida primero quién eres y después qué le mandas, así que la respuesta
+	 * distingue las dos cosas:
+	 *
+	 * - Se queja del contenido ("El archivo ZIP no contiene comprobantes") →
+	 *   pasó la autenticación: las credenciales son válidas.
+	 * - Se queja del usuario o la clave → las credenciales están mal.
+	 *
+	 * Es seguro incluso en producción: lo enviado no es un documento, así que no
+	 * se emite ninguna boleta ni se consume numeración. Vale la pena porque el
+	 * sandbox NO valida credenciales (acepta cualquiera), y sin esto las reales
+	 * de saraih solo se estrenarían con la primera boleta de verdad.
+	 *
+	 * @return array {
+	 *     @type bool   $ok      True si la autenticación pasó.
+	 *     @type string $mensaje Explicación para la pantalla.
+	 * }
+	 */
+	public static function probar_credenciales() {
+		if ( ! function_exists( 'msp_facturacion_disponible' ) || ! msp_facturacion_disponible() ) {
+			return array(
+				'ok'      => false,
+				'mensaje' => __( 'El motor de emisión no está disponible: faltan las dependencias del plugin.', 'multisede-pos' ),
+			);
+		}
+
+		$a = self::ajustes();
+
+		if ( '' === trim( (string) $a['sol_usuario'] ) || '' === trim( (string) $a['sol_clave'] ) ) {
+			return array(
+				'ok'      => false,
+				'mensaje' => __( 'Faltan el usuario o la clave SOL.', 'multisede-pos' ),
+			);
+		}
+
+		try {
+			$cliente = new \Greenter\Ws\Services\SoapClient(
+				\Greenter\Ws\Services\WsdlProvider::getBillPath(),
+				array(
+					'exceptions'         => true,
+					'connection_timeout' => 20,
+					'stream_context'     => stream_context_create(
+						array(
+							'ssl'  => array(
+								'verify_peer'       => false,
+								'verify_peer_name'  => false,
+								'allow_self_signed' => true,
+							),
+							'http' => array( 'timeout' => 25 ),
+						)
+					),
+				)
+			);
+			$cliente->setService(
+				self::es_produccion()
+					? \Greenter\Ws\Services\SunatEndpoints::FE_PRODUCCION
+					: \Greenter\Ws\Services\SunatEndpoints::FE_BETA
+			);
+			$cliente->setCredentials( $a['ruc'] . $a['sol_usuario'], $a['sol_clave'] );
+
+			$cliente->call(
+				'sendBill',
+				array(
+					array(
+						'fileName'    => $a['ruc'] . '-03-XXXX-0.zip',
+						'contentFile' => 'msp-comprobacion-de-credenciales',
+					),
+				)
+			);
+
+			// Si no lanza excepción, algo muy raro pasó: SUNAT debería haberse
+			// quejado del contenido. Se toma como no concluyente.
+			return array(
+				'ok'      => false,
+				'mensaje' => __( 'SUNAT respondió de forma inesperada. Reintenta en unos minutos.', 'multisede-pos' ),
+			);
+
+		} catch ( \SoapFault $e ) {
+			return self::interpretar_fault( $e );
+		} catch ( \Exception $e ) {
+			return array(
+				'ok'      => false,
+				'mensaje' => sprintf(
+					/* translators: %s: mensaje de error. */
+					__( 'No se pudo contactar con SUNAT: %s', 'multisede-pos' ),
+					$e->getMessage()
+				),
+			);
+		}
+	}
+
+	/**
+	 * Traduce la respuesta de la prueba de credenciales.
+	 *
+	 * @param \SoapFault $e Error devuelto por SUNAT.
+	 * @return array
+	 */
+	private static function interpretar_fault( $e ) {
+		$codigo  = (string) ( isset( $e->faultcode ) ? $e->faultcode : '' );
+		$mensaje = (string) $e->getMessage();
+		$texto   = $codigo . ' ' . $mensaje;
+
+		// Quejas sobre el contenido = la autenticación pasó.
+		$paso = preg_match( '/0157|0126|0109|ZIP|comprobante/i', $texto );
+
+		// Quejas sobre quién eres.
+		$auth = preg_match( '/0102|0103|0105|0110|0111|usuario|contrase|clave|password/i', $texto );
+
+		if ( $auth && ! $paso ) {
+			return array(
+				'ok'      => false,
+				'mensaje' => sprintf(
+					/* translators: %s: respuesta literal de SUNAT. */
+					__( 'Usuario o clave SOL incorrectos. SUNAT respondió: %s', 'multisede-pos' ),
+					$mensaje
+				),
+			);
+		}
+
+		if ( $paso ) {
+			// En beta este resultado NO significa nada: el sandbox acepta
+			// cualquier credencial. Comprobado enviando usuario y clave
+			// inventados, que también "pasan". Decir "válidas" ahí sería mentir,
+			// y lo peor que puede hacer esta pantalla es dar una falsa
+			// tranquilidad justo sobre el dato que detiene la emisión si falla.
+			if ( ! self::es_produccion() ) {
+				return array(
+					'ok'      => false,
+					'mensaje' => __( 'SUNAT respondió, así que hay conexión y el envío llega. Pero esto NO prueba que las credenciales sirvan: el sandbox acepta cualquier usuario y clave, incluso inventados. Esta comprobación solo tiene valor con el entorno en producción.', 'multisede-pos' ),
+				);
+			}
+
+			return array(
+				'ok'      => true,
+				'mensaje' => __( 'Credenciales válidas: SUNAT aceptó la identificación y solo objetó el contenido de prueba, que es lo esperado. No se emitió ningún comprobante ni se consumió numeración.', 'multisede-pos' ),
+			);
+		}
+
+		return array(
+			'ok'      => false,
+			'mensaje' => sprintf(
+				/* translators: %s: respuesta literal de SUNAT. */
+				__( 'Respuesta no concluyente de SUNAT: %s', 'multisede-pos' ),
+				$texto
+			),
+		);
+	}
+
+	/**
 	 * Emite un comprobante ya reservado.
 	 *
 	 * @param int $comprobante_id ID en wp_msp_comprobantes.

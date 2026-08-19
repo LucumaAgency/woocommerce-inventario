@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.9.5
+- **Versión actual:** 1.9.6
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -309,6 +309,7 @@ Capa que emitirá los comprobantes electrónicos SUNAT. El POS y la web **no hab
 ### MSP_Emisor (Fase 2 de boletas — v1.8.0)
 Motor de emisión: arma el XML UBL con **Greenter**, lo firma con el certificado PEM y lo envía por SOAP al web service de SUNAT. Recibe un comprobante ya reservado y lo lleva hasta el CDR; **no decide cuándo emitir** (eso es la cola).
 
+- `probar_credenciales()` — comprueba el usuario y la clave SOL **sin emitir**. Envía a propósito un archivo que no es un comprobante: SUNAT valida primero quién eres y después qué le mandas, así que una queja sobre el contenido significa que la autenticación pasó. Seguro incluso en producción. **En beta devuelve siempre «no concluyente»**: el sandbox acepta cualquier credencial, comprobado con usuario y clave inventados.
 - `emitir( $comprobante_id )` — firma, envía, guarda XML y CDR, y deja el comprobante en `aceptado`, `rechazado` o `error`.
 - `ajustes()` / `es_produccion()` — opción `msp_facturacion`: entorno, credenciales SOL, datos del emisor y el interruptor `emision_automatica`.
 - `codigo_local( $sede_id )` — código de establecimiento del meta `_msp_codigo_anexo` de la sede, o **`0000`** (domicilio fiscal) si no tiene. saraih emite con `0000`: decidió no declarar sus tiendas como anexos.
@@ -413,6 +414,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.7.0** | **Boletas Fase 1** — tabla `wp_msp_comprobantes`, reserva de correlativo a prueba de carreras, serie de boleta por sede (`_msp_serie_boleta`). Base de facturación electrónica; aún no emite |
 | **1.7.1 – 1.7.5** | Correcciones del recorrido de verificación: acceso del personal de tienda al panel, stock que no llegaba a Woo, egresos mayores que el efectivo del cajón, recuperación de capacidades del admin y menú Sedes |
 | **1.8.0** | **Boletas Fase 2** — motor de emisión con Greenter: XML UBL, firma, envío SOAP a SUNAT, CDR y conservación de archivos. Pantalla de Facturación con emisión de prueba |
+| **1.9.6** | Botón **Probar credenciales SOL** sin emitir nada: se envía a propósito un archivo que no es un comprobante, así que SUNAT solo puede objetar el contenido. Distingue «no me identificas» de «tu archivo está mal» sin consumir numeración. En beta avisa de que el resultado no significa nada |
 | **1.9.5** | Los fallos previos al envío (certificado ausente o ilegible, Greenter a medias) quedan registrados en el comprobante en vez de dejarlo «En cola» sin motivo, e interruptor **Simular fallo de envío** para poder ejercitar la cola de reintentos: el sandbox de SUNAT no valida la clave SOL, así que un envío nunca falla ahí por credenciales |
 | **1.9.4** | El bloque de recojo y el DNI suben al principio del checkout (hook filtrable con `msp_recojo_hook_checkout`), y los archivos conservados se nombran con el correlativo completo |
 | **1.9.3** | Sobre S/ 700 la boleta exige **DNI y nombre**, no solo el documento: una boleta de S/ 900 con DNI real a nombre de «CLIENTE VARIOS» es contradictoria y así saldría impresa |

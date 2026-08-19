@@ -452,6 +452,93 @@ class MSP_Caja {
 	}
 
 	/**
+	 * Anula una venta del turno abierto, desde la propia pantalla de Caja.
+	 *
+	 * Existe porque anular vivía en Pedidos de WooCommerce, que el cajero no
+	 * puede abrir: quien se equivocaba al cobrar no tenía forma de deshacerlo y
+	 * dependía de que un administrador lo hiciera por él.
+	 *
+	 * Anular ventas en efectivo es la vía clásica de fuga de caja, así que hay
+	 * tres candados, y ninguno es cosmético:
+	 *
+	 * - **Solo ventas del turno abierto del propio cajero.** Así el egreso cae
+	 *   en su cuadre y lo ve él mismo al cerrar. Anular ventas de turnos ya
+	 *   cerrados seguiría siendo cosa del administrador.
+	 * - **Motivo obligatorio**, escrito en el pedido junto al nombre de quien
+	 *   anuló. Una anulación sin explicación es exactamente lo que hay que poder
+	 *   revisar después.
+	 * - **Capacidad propia** (`msp_anular_ventas`), que se le puede quitar al rol
+	 *   Cajero y dejar solo al Gerente.
+	 *
+	 * El resto ocurre solo: el stock vuelve a la sede, la caja registra el
+	 * egreso y, si la boleta estaba aceptada, se comunica su baja a SUNAT.
+	 *
+	 * @param int $sede_id   Sede.
+	 * @param int $cajero_id Usuario.
+	 * @return string Clave del aviso.
+	 */
+	private function anular_venta_del_turno( $sede_id, $cajero_id ) {
+		if ( ! current_user_can( 'msp_anular_ventas' ) ) {
+			return 'anular_sin_permiso';
+		}
+
+		$sesion = self::sesion_abierta( $sede_id, $cajero_id );
+		if ( ! $sesion ) {
+			return 'anular_sin_turno';
+		}
+
+		$pedido_id = isset( $_POST['pedido'] ) ? absint( wp_unslash( $_POST['pedido'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- comprobado en procesar().
+		$motivo    = isset( $_POST['motivo'] ) ? sanitize_text_field( wp_unslash( $_POST['motivo'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+		if ( '' === trim( $motivo ) ) {
+			return 'anular_sin_motivo';
+		}
+
+		$order = $pedido_id ? wc_get_order( $pedido_id ) : null;
+		if ( ! $order ) {
+			return 'anular_no_existe';
+		}
+
+		// La venta tiene que ser de este turno: misma sede, mismo cajero y
+		// dentro de la ventana del turno. Sin esto, cambiar el número en el
+		// formulario permitiría anular cualquier pedido de la tienda.
+		$de_este_turno = false;
+		foreach ( self::ventas_de_sesion( $sesion ) as $venta ) {
+			if ( (int) $venta->get_id() === (int) $order->get_id() ) {
+				$de_este_turno = true;
+				break;
+			}
+		}
+
+		if ( ! $de_este_turno ) {
+			return 'anular_otro_turno';
+		}
+
+		if ( in_array( $order->get_status(), array( 'cancelled', 'refunded' ), true ) ) {
+			return 'anular_ya_anulada';
+		}
+
+		$usuario = wp_get_current_user();
+		$order->add_order_note(
+			sprintf(
+				/* translators: 1: nombre del cajero, 2: motivo. */
+				__( 'Venta anulada desde Caja por %1$s. Motivo: %2$s', 'multisede-pos' ),
+				$usuario ? $usuario->display_name : $cajero_id,
+				$motivo
+			)
+		);
+		$order->update_meta_data( '_msp_anulada_por', (int) $cajero_id );
+		$order->update_meta_data( '_msp_anulada_motivo', $motivo );
+		$order->save();
+
+		// A partir de aquí actúa lo de siempre: reposición de stock, egreso en
+		// caja y, si la boleta estaba aceptada, la baja ante SUNAT.
+		$order->update_status( 'cancelled' );
+
+		return 'anulada';
+	}
+
+	/**
 	 * Registra una venta POS en efectivo como movimiento de caja.
 	 *
 	 * @param WC_Order $order   Pedido.
@@ -680,6 +767,9 @@ class MSP_Caja {
 			$ok       = self::abrir( $sede_id, $cajero_id, $apertura );
 			$aviso    = $ok ? 'abierta' : 'ya_abierta';
 
+		} elseif ( 'anular_venta' === $accion ) {
+			$aviso = $this->anular_venta_del_turno( $sede_id, $cajero_id );
+
 		} elseif ( 'mov_caja' === $accion ) {
 			$sesion = self::sesion_abierta( $sede_id, $cajero_id );
 			if ( $sesion ) {
@@ -780,6 +870,13 @@ class MSP_Caja {
 			'movimiento' => array( 'success', __( 'Movimiento registrado.', 'multisede-pos' ) ),
 			'cerrada'    => array( 'success', __( 'Caja cerrada. Revisa el cuadre abajo.', 'multisede-pos' ) ),
 			'egreso_excede' => array( 'error', __( 'No se registró: el egreso es mayor que el efectivo que hay en el cajón. Revisa el monto, o registra primero el ingreso que falte.', 'multisede-pos' ) ),
+			'anulada'            => array( 'success', __( 'Venta anulada. El stock volvió a la tienda y, si fue en efectivo, el egreso quedó registrado en tu caja.', 'multisede-pos' ) ),
+			'anular_sin_permiso' => array( 'error', __( 'No tienes permiso para anular ventas. Pídeselo al gerente.', 'multisede-pos' ) ),
+			'anular_sin_turno'   => array( 'error', __( 'Necesitas la caja abierta para anular una venta.', 'multisede-pos' ) ),
+			'anular_sin_motivo'  => array( 'error', __( 'Escribe el motivo de la anulación.', 'multisede-pos' ) ),
+			'anular_no_existe'   => array( 'error', __( 'Esa venta no existe.', 'multisede-pos' ) ),
+			'anular_otro_turno'  => array( 'error', __( 'Solo puedes anular ventas de tu turno abierto. Para las de turnos anteriores, pídelo a un administrador.', 'multisede-pos' ) ),
+			'anular_ya_anulada'  => array( 'warning', __( 'Esa venta ya estaba anulada.', 'multisede-pos' ) ),
 		);
 		if ( isset( $mensajes[ $aviso ] ) ) {
 			printf(
@@ -914,6 +1011,7 @@ class MSP_Caja {
 		$total_efectivo = 0.0;
 		$truncado       = count( $pedidos ) >= self::MAX_VENTAS_TURNO;
 		$puede_ver_pedido = current_user_can( 'edit_shop_orders' );
+		$puede_anular     = current_user_can( 'msp_anular_ventas' );
 
 		echo '<table class="widefat striped"><thead><tr>';
 		echo '<th style="width:70px">' . esc_html__( 'Hora', 'multisede-pos' ) . '</th>';
@@ -921,6 +1019,7 @@ class MSP_Caja {
 		echo '<th>' . esc_html__( 'Qué se vendió', 'multisede-pos' ) . '</th>';
 		echo '<th style="width:130px">' . esc_html__( 'Pago', 'multisede-pos' ) . '</th>';
 		echo '<th style="width:110px">' . esc_html__( 'Total', 'multisede-pos' ) . '</th>';
+		echo '<th style="width:90px"></th>';
 		echo '</tr></thead><tbody>';
 
 		foreach ( $pedidos as $pedido ) {
@@ -980,14 +1079,34 @@ class MSP_Caja {
 			echo '</td>';
 
 			echo '<td>' . wp_kses_post( wc_price( $total ) ) . '</td>';
+
+			echo '<td>';
+			if ( $puede_anular && ! $anulado ) {
+				// Un formulario por fila: así el número de pedido viaja sin
+				// depender de JavaScript para elegir cuál se anula.
+				echo '<form method="post" style="display:inline">';
+				wp_nonce_field( 'msp_caja', 'msp_caja_nonce' );
+				echo '<input type="hidden" name="msp_caja_action" value="anular_venta" />';
+				echo '<input type="hidden" name="sede" value="' . esc_attr( $sesion->sede_id ) . '" />';
+				echo '<input type="hidden" name="pedido" value="' . esc_attr( $pedido->get_id() ) . '" />';
+				echo '<input type="hidden" name="motivo" value="" />';
+				printf(
+					'<button type="submit" class="button button-small" onclick="var m=window.prompt(%1$s); if(!m){return false;} this.form.motivo.value=m; return true;">%2$s</button>',
+					esc_attr( wp_json_encode( __( '¿Por qué se anula esta venta? (queda escrito en el pedido)', 'multisede-pos' ) ) ),
+					esc_html__( 'Anular', 'multisede-pos' )
+				);
+				echo '</form>';
+			}
+			echo '</td>';
+
 			echo '</tr>';
 		}
 
 		echo '</tbody><tfoot>';
 		echo '<tr><th colspan="4">' . esc_html__( 'Total vendido en el turno', 'multisede-pos' ) .
-			'</th><th>' . wp_kses_post( wc_price( $total_vendido ) ) . '</th></tr>';
+			'</th><th>' . wp_kses_post( wc_price( $total_vendido ) ) . '</th><th></th></tr>';
 		echo '<tr><th colspan="4">' . esc_html__( 'De eso, en efectivo (lo que sí está en el cajón)', 'multisede-pos' ) .
-			'</th><th>' . wp_kses_post( wc_price( $total_efectivo ) ) . '</th></tr>';
+			'</th><th>' . wp_kses_post( wc_price( $total_efectivo ) ) . '</th><th></th></tr>';
 		echo '</tfoot></table>';
 
 		if ( $truncado ) {

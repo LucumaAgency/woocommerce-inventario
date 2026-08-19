@@ -19,7 +19,7 @@ class MSP_Roles {
 	 * siguiente carga del admin (las actualizaciones por Git Updater no
 	 * disparan el hook de activación).
 	 */
-	const ROLES_VERSION = '2';
+	const ROLES_VERSION = '3';
 
 	/**
 	 * Capacidades propias del plugin.
@@ -34,6 +34,7 @@ class MSP_Roles {
 			'msp_usar_pos',            // Vender en mostrador.
 			'msp_gestionar_caja',      // Abrir/cerrar caja, arqueo.
 			'msp_ver_reportes',        // Reportes por sede.
+			'msp_anular_ventas',       // Anular una venta del turno abierto.
 		);
 	}
 
@@ -110,14 +111,22 @@ class MSP_Roles {
 			'msp_usar_pos'        => true,
 			'msp_gestionar_caja'  => true,
 			'msp_ver_reportes'    => true,
+			'msp_anular_ventas'   => true,
 		);
 
 		// Cajero: POS y su caja. Ve el stock, no lo ajusta.
+		// El cajero puede anular ventas de SU turno abierto. Es la vía clásica
+		// de fuga de caja (anular una venta en efectivo y quedarse el dinero),
+		// así que la capacidad va suelta: se le puede quitar y dejarla solo al
+		// gerente sin tocar nada más. Las salvaguardas están en el código: solo
+		// su turno abierto, con motivo obligatorio y con su nombre escrito en el
+		// pedido.
 		$cajero = array(
 			'read'               => true,
 			'msp_ver_stock'      => true,
 			'msp_usar_pos'       => true,
 			'msp_gestionar_caja' => true,
+			'msp_anular_ventas'  => true,
 		);
 
 		// add_role() no hace nada si el rol ya existe: para poder cambiar las

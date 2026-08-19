@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.14.2
+- **Versión actual:** 1.15.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -205,6 +205,7 @@ Roles creados por el plugin (además del Administrador, que recibe todo):
 | `msp_gestionar_stock` | ✅ | ❌ |
 | `msp_usar_pos` | ✅ | ✅ |
 | `msp_gestionar_caja` | ✅ | ✅ |
+| `msp_anular_ventas` | Anular una venta del turno abierto. Suelta a propósito: se le puede quitar al Cajero y dejarla solo al Gerente, porque anular ventas en efectivo es la vía clásica de fuga de caja |
 | `msp_ver_reportes` | ✅ | ❌ |
 | `msp_gestionar_sedes` | ❌ (solo admin) | ❌ |
 

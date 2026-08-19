@@ -153,15 +153,18 @@ class MSP_Recojo {
 			return $campos;
 		}
 
-		// Prioridad 25: entre el teléfono (20) y el correo (30). Los datos de
-		// contacto van juntos y el documento pertenece a ese grupo.
+		// Prioridad 120: **después del correo**. Las prioridades nativas de
+		// WooCommerce son nombre 10, apellidos 20, empresa 30, país 40,
+		// dirección 50/60, distrito 70, departamento 80, código postal 90,
+		// teléfono 100 y correo 110. El documento cierra el bloque de datos del
+		// cliente en vez de interrumpirlo por la mitad.
 		$campos['billing']['billing_dni'] = array(
 			'type'              => 'text',
 			'label'             => __( 'DNI', 'multisede-pos' ),
 			'placeholder'       => __( '8 dígitos', 'multisede-pos' ),
 			'required'          => true,
 			'class'             => array( 'form-row-wide' ),
-			'priority'          => 25,
+			'priority'          => 120,
 			'custom_attributes' => array(
 				'inputmode' => 'numeric',
 				'maxlength' => '8',

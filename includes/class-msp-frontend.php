@@ -310,26 +310,50 @@ class MSP_Frontend {
 	 * Revalida todo el carrito contra la sede elegida (antes del checkout).
 	 */
 	public function validar_carrito() {
-		$sede = self::sede_activa();
-		if ( ! $sede || ! WC()->cart ) {
-			return;
+		foreach ( self::problemas_de_stock( self::sede_activa() ) as $mensaje ) {
+			wc_add_notice( $mensaje, 'error' );
+		}
+	}
+
+	/**
+	 * Líneas del carrito que no caben en el stock de una sede.
+	 *
+	 * Devuelve mensajes en vez de pintarlos para poder reutilizar la misma
+	 * comprobación en dos momentos distintos: al pintar el carrito y al pulsar
+	 * "pagar". Duplicar la regla en dos sitios habría garantizado que algún día
+	 * dejaran de decir lo mismo.
+	 *
+	 * @param int $sede Sede contra la que validar.
+	 * @return string[] Mensajes de error (vacío si todo cabe).
+	 */
+	public static function problemas_de_stock( $sede ) {
+		$sede      = (int) $sede;
+		$problemas = array();
+
+		if ( ! $sede || ! function_exists( 'WC' ) || ! WC()->cart ) {
+			return $problemas;
 		}
 
 		foreach ( WC()->cart->get_cart() as $item ) {
 			$pid  = $item['variation_id'] ? $item['variation_id'] : $item['product_id'];
 			$disp = MSP_Stock::disponible_sede( $pid, $sede );
 			if ( (int) $item['quantity'] > $disp ) {
-				$product = $item['data'];
-				wc_add_notice(
-					sprintf(
+				$product     = $item['data'];
+				$problemas[] = $disp > 0
+					? sprintf(
 						/* translators: 1: producto, 2: stock disponible. */
 						__( '"%1$s": solo hay %2$d disponibles en la tienda elegida. Ajusta la cantidad.', 'multisede-pos' ),
 						$product ? $product->get_name() : $pid,
 						$disp
-					),
-					'error'
-				);
+					)
+					: sprintf(
+						/* translators: %s: producto. */
+						__( '"%s" se acaba de agotar en la tienda elegida. Quítalo del carrito o elige otra tienda.', 'multisede-pos' ),
+						$product ? $product->get_name() : $pid
+					);
 			}
 		}
+
+		return $problemas;
 	}
 }

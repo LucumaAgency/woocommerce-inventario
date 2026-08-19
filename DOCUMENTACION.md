@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.12.0
+- **Versión actual:** 1.13.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -277,6 +277,13 @@ Añade los campos de stock por sede en la pestaña **Inventario** del producto (
 - Registra automáticamente las ventas POS en efectivo (vía `msp_pos_venta_creada`).
 - Cierre con **arqueo**: esperado (`apertura + ingresos + ventas − egresos`) vs contado → diferencia.
 - Reporte de cierres recientes por sede.
+
+### MSP_Entregas (v1.13.0)
+`Entregas`, menú propio, con `msp_usar_pos`. Lista los pedidos **web pendientes de recojo** de las sedes del usuario, con una sola acción: **Entregar**.
+
+Existe porque marcar un pedido como recogido se hacía desde Pedidos de WooCommerce, que exige `edit_shop_orders`, y el rol Cajero no la tiene: **no podía entregar nada**, y la Ayuda le documentaba ese flujo paso a paso. Darle `edit_shop_orders` habría sido peor: vería los pedidos de todas las tiendas y podría editar precios y estados.
+
+Comprueba la sede del pedido **también al ejecutar la acción**, no solo al listar: sin eso, cambiar el número en la URL entregaría el pedido de otra tienda.
 
 ### MSP_Cajas_Abiertas (v1.12.0)
 `Caja → Cajas abiertas`, con `msp_ver_reportes`. Lista los turnos **abiertos ahora mismo** en todas las sedes, con cajero, hora de apertura, tiempo transcurrido, monto de apertura, ventas en efectivo, ingresos/egresos y el **efectivo esperado** en cada cajón, más el total en mostrador.

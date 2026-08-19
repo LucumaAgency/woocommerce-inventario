@@ -320,6 +320,46 @@ class MSP_Stock {
 	}
 
 	/**
+	 * Reserva unidades SOLO si hay disponibles. Atómico.
+	 *
+	 * Es a la reserva web lo que `descontar_si_hay()` es a la venta de
+	 * mostrador. La versión incondicional (`reservar()`) permitía que dos
+	 * compras simultáneas de la última unidad reservaran las dos: el
+	 * `stock_reservado` acababa por encima del stock físico y la tienda quedaba
+	 * comprometida a entregar algo que no tiene.
+	 *
+	 * La condición viaja dentro del propio UPDATE, no en un SELECT previo: entre
+	 * un SELECT y un UPDATE cabe otra compra.
+	 *
+	 * @param int $producto_id ID de producto o variación.
+	 * @param int $sede_id     ID de sede.
+	 * @param int $cantidad    Unidades.
+	 * @return bool True si se reservó.
+	 */
+	public static function reservar_si_hay( $producto_id, $sede_id, $cantidad ) {
+		global $wpdb;
+		$cantidad = max( 0, (int) $cantidad );
+		if ( ! $cantidad ) {
+			return true;
+		}
+
+		$filas = $wpdb->query(
+			$wpdb->prepare(
+				'UPDATE ' . self::tabla() . '
+				 SET stock_reservado = stock_reservado + %d, updated_at = %s
+				 WHERE producto_id = %d AND sede_id = %d AND (stock - stock_reservado) >= %d',
+				$cantidad,
+				current_time( 'mysql' ),
+				$producto_id,
+				$sede_id,
+				$cantidad
+			)
+		);
+
+		return $filas > 0;
+	}
+
+	/**
 	 * Libera una reserva sin descontar stock (cancelación antes del recojo).
 	 *
 	 * @param int $producto_id ID de producto.

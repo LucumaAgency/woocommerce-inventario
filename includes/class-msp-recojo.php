@@ -180,6 +180,17 @@ class MSP_Recojo {
 			wc_add_notice( __( 'Por favor elige la sede donde recogerás tu pedido.', 'multisede-pos' ), 'error' );
 		}
 
+		// Revalidar el stock AQUÍ, contra la sede que se está enviando. Hasta
+		// ahora solo se comprobaba al pintar el carrito y el checkout
+		// (`woocommerce_check_cart_items`), y entre eso y pulsar "pagar" puede
+		// pasar un rato largo: el cliente rellena sus datos mientras otra
+		// persona compra la última unidad.
+		if ( $sede && class_exists( 'MSP_Frontend' ) ) {
+			foreach ( MSP_Frontend::problemas_de_stock( $sede ) as $mensaje ) {
+				wc_add_notice( $mensaje, 'error' );
+			}
+		}
+
 		if ( ! class_exists( 'MSP_Cola' ) || ! MSP_Cola::activa() ) {
 			return;
 		}
@@ -281,6 +292,9 @@ class MSP_Recojo {
 			return;
 		}
 
+		$reservados = array();
+		$faltantes  = array();
+
 		foreach ( $order->get_items() as $item ) {
 			if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) {
 				continue;
@@ -292,8 +306,39 @@ class MSP_Recojo {
 			$producto_id = $product->get_id();
 			$cantidad    = (int) $item->get_quantity();
 
-			MSP_Stock::reservar( $producto_id, $sede_id, $cantidad );
+			// Reserva condicional: si entre que el cliente vio el checkout y
+			// pulsó pagar alguien se llevó la última unidad, aquí falla en vez
+			// de comprometer stock que no existe.
+			if ( MSP_Stock::reservar_si_hay( $producto_id, $sede_id, $cantidad ) ) {
+				$reservados[ $producto_id ] = $cantidad;
+			} else {
+				$faltantes[] = $product->get_name();
+			}
 			MSP_Stock::sincronizar_woo( $producto_id );
+		}
+
+		if ( $faltantes ) {
+			// El pedido ya existe y probablemente ya está pagado, así que no se
+			// revierte: se devuelve lo reservado, se deja el pedido EN ESPERA y
+			// se avisa. Un pedido en espera lo ve un humano; una reserva
+			// imposible no la ve nadie hasta que el cliente viene a recoger y no
+			// hay mercadería.
+			foreach ( $reservados as $pid => $qty ) {
+				MSP_Stock::liberar_reserva( $pid, $sede_id, $qty );
+				MSP_Stock::sincronizar_woo( $pid );
+			}
+
+			$order->update_meta_data( '_msp_reserva_estado', 'sin_stock' );
+			$order->add_order_note(
+				sprintf(
+					/* translators: %s: lista de productos. */
+					__( 'ATENCIÓN: no se pudo reservar stock en la tienda elegida para: %s. Alguien compró esas unidades mientras se completaba este pedido. Contacta al cliente antes de cobrar o entregar.', 'multisede-pos' ),
+					implode( ', ', $faltantes )
+				)
+			);
+			$order->update_status( 'on-hold' );
+			$order->save();
+			return;
 		}
 
 		$order->update_meta_data( '_msp_reserva_estado', 'reservado' );

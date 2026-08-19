@@ -75,6 +75,11 @@ class MSP_Plugin {
 			$cajas_abiertas = new MSP_Cajas_Abiertas();
 			$cajas_abiertas->init();
 
+			// Entregas de pedidos web (hallazgo F): el cajero necesita poder
+			// entregar sin entrar al listado de pedidos de WooCommerce.
+			$entregas = new MSP_Entregas();
+			$entregas->init();
+
 			$inventario = new MSP_Inventario();
 			$inventario->init();
 

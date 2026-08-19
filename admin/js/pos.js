@@ -224,6 +224,12 @@
 
 		var $btn = $( this ).prop( 'disabled', true );
 
+		cobrar( $btn, $msg, items, dni );
+	} );
+
+	// Cobro, aislado para poder reintentarlo tras abrir la caja sin que el
+	// cajero tenga que volver a armar el ticket.
+	function cobrar( $btn, $msg, items, dni ) {
 		$.post(
 			mspPOS.ajaxurl,
 			{
@@ -252,6 +258,34 @@
 				$( '#msp-pos-dni-aviso' ).text( '' );
 				$( '#msp-pos-buscar' ).val( '' );
 				$( '#msp-pos-resultados' ).empty();
+			} else if ( resp.data && resp.data.sin_caja ) {
+				// Cobro en efectivo sin caja abierta: se ofrece abrirla aquí
+				// mismo en vez de mandar al cajero a otra pantalla con el
+				// ticket a medias y un cliente esperando.
+				$msg.html( '<span class="err">' + resp.data.msg + '</span>' );
+				var apertura = window.prompt( mspPOS.i18n.abrir_caja, '0' );
+				if ( null === apertura ) {
+					return;
+				}
+				$msg.html( mspPOS.i18n.abriendo );
+				$.post(
+					mspPOS.ajaxurl,
+					{
+						action: 'msp_pos_abrir_caja',
+						nonce: mspPOS.nonce,
+						sede: $( '#msp-pos-sede' ).val(),
+						apertura: parseFloat( apertura ) || 0
+					}
+				).done( function ( r2 ) {
+					if ( r2.success ) {
+						$msg.html( '<span class="ok">' + r2.data.msg + '</span>' );
+						cobrar( $btn, $msg, items, dni );
+					} else {
+						$msg.html( '<span class="err">' + ( r2.data && r2.data.msg ? r2.data.msg : mspPOS.i18n.error ) + '</span>' );
+					}
+				} ).fail( function () {
+					$msg.html( '<span class="err">' + mspPOS.i18n.error + '</span>' );
+				} );
 			} else {
 				$msg.html( '<span class="err">' + ( resp.data && resp.data.msg ? resp.data.msg : mspPOS.i18n.error ) + '</span>' );
 			}
@@ -260,7 +294,7 @@
 		} ).always( function () {
 			$btn.prop( 'disabled', false );
 		} );
-	} );
+	}
 
 	// Estado inicial.
 	calcularVuelto();

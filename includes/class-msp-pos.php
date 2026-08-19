@@ -24,6 +24,7 @@ class MSP_POS {
 		add_action( 'admin_enqueue_scripts', array( $this, 'assets' ) );
 		add_action( 'wp_ajax_msp_pos_buscar', array( $this, 'ajax_buscar' ) );
 		add_action( 'wp_ajax_msp_pos_cobrar', array( $this, 'ajax_cobrar' ) );
+		add_action( 'wp_ajax_msp_pos_abrir_caja', array( $this, 'ajax_abrir_caja' ) );
 
 		// Reposición de stock si se cancela/reembolsa una venta de mostrador.
 		add_action( 'woocommerce_order_status_cancelled', array( $this, 'reponer_stock' ) );
@@ -131,6 +132,8 @@ class MSP_POS {
 					'falta_nombre'   => __( 'Falta el nombre del cliente.', 'multisede-pos' ),
 					'falta_dni'      => __( 'Falta el DNI del cliente.', 'multisede-pos' ),
 					'dni_corto'      => __( 'El DNI tiene 8 dígitos.', 'multisede-pos' ),
+					'abrir_caja'     => __( '¿Con cuánto efectivo abres la caja? (0 si empiezas sin fondo)', 'multisede-pos' ),
+					'abriendo'       => __( 'Abriendo caja…', 'multisede-pos' ),
 				),
 			)
 		);
@@ -378,6 +381,24 @@ class MSP_POS {
 			wp_send_json_error( array( 'msg' => __( 'No hay productos válidos en el ticket.', 'multisede-pos' ) ), 400 );
 		}
 
+		// Cobrar en efectivo exige caja abierta. Si no la hay, ese dinero entra
+		// al cajón sin quedar registrado en ninguna parte: no suma al cuadre, no
+		// aparece en el arqueo y nadie lo echa de menos hasta que las cuentas no
+		// dan. Con otros medios de pago el riesgo es menor, porque no hay
+		// efectivo que controlar.
+		//
+		// Se comprueba antes de descontar stock y crear el pedido, igual que el
+		// DNI: si falta, la venta no llega a existir.
+		if ( 'efectivo' === $metodo && ! MSP_Caja::sesion_abierta( $sede_id, get_current_user_id() ) ) {
+			wp_send_json_error(
+				array(
+					'msg'       => __( 'No tienes la caja abierta en esta tienda. Ábrela para que el efectivo de esta venta quede registrado.', 'multisede-pos' ),
+					'sin_caja'  => true,
+				),
+				409
+			);
+		}
+
 		// SUNAT exige identificar al comprador cuando la boleta pasa de S/ 700, y
 		// identificar es documento Y nombre: una boleta de S/ 900 con un DNI real
 		// a nombre de "CLIENTE VARIOS" es contradictoria, y así saldría impresa.
@@ -500,6 +521,44 @@ class MSP_POS {
 					/* translators: %s: número de pedido. */
 					__( 'Venta registrada. Pedido #%s.', 'multisede-pos' ),
 					$order->get_order_number()
+				),
+			)
+		);
+	}
+
+	/**
+	 * Abre la caja desde el propio POS.
+	 *
+	 * Existe para no mandar al cajero a otra pantalla con un cliente delante y
+	 * el ticket a medias: se abre aquí, se cobra y se sigue.
+	 */
+	public function ajax_abrir_caja() {
+		check_ajax_referer( 'msp_pos', 'nonce' );
+
+		if ( ! current_user_can( 'msp_gestionar_caja' ) ) {
+			wp_send_json_error( array( 'msg' => __( 'Sin permiso para abrir caja.', 'multisede-pos' ) ), 403 );
+		}
+
+		$sede_id  = isset( $_POST['sede'] ) ? absint( wp_unslash( $_POST['sede'] ) ) : 0;
+		$apertura = isset( $_POST['apertura'] ) ? (float) wp_unslash( $_POST['apertura'] ) : 0;
+
+		if ( ! $sede_id || ! $this->puede_usar_sede( $sede_id ) ) {
+			wp_send_json_error( array( 'msg' => __( 'Sede no válida.', 'multisede-pos' ) ), 400 );
+		}
+		if ( $apertura < 0 ) {
+			wp_send_json_error( array( 'msg' => __( 'El monto de apertura no puede ser negativo.', 'multisede-pos' ) ), 400 );
+		}
+
+		if ( ! MSP_Caja::abrir( $sede_id, get_current_user_id(), $apertura ) ) {
+			wp_send_json_error( array( 'msg' => __( 'Ya tenías una caja abierta en esta tienda.', 'multisede-pos' ) ), 409 );
+		}
+
+		wp_send_json_success(
+			array(
+				'msg' => sprintf(
+					/* translators: %s: monto de apertura. */
+					__( 'Caja abierta con %s. Ya puedes cobrar.', 'multisede-pos' ),
+					wp_strip_all_tags( wc_price( $apertura ) )
 				),
 			)
 		);

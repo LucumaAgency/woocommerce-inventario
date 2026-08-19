@@ -150,13 +150,13 @@ class MSP_Ayuda {
 				<ol>
 					<li><?php
 						printf(
-							/* translators: %s: enlace a los pedidos de WooCommerce. */
-							esc_html__( 'Cuando el cliente venga, abre su pedido en %s.', 'multisede-pos' ),
-							'<a href="' . esc_url( self::url_pedidos() ) . '"><strong>' . esc_html__( 'WooCommerce → Pedidos', 'multisede-pos' ) . '</strong></a>'
+							/* translators: %s: enlace a la pantalla de Entregas. */
+							esc_html__( 'Cuando el cliente venga, entra en %s. Ahí salen los pedidos comprados por la web que esperan a recogerse en tu tienda, y solo los de tu tienda.', 'multisede-pos' ),
+							'<a href="' . esc_url( admin_url( 'admin.php?page=' . MSP_Entregas::PAGE ) ) . '"><strong>' . esc_html__( 'Entregas', 'multisede-pos' ) . '</strong></a>'
 						);
 					?></li>
-					<li><?php esc_html_e( 'Comprueba arriba a la derecha que la sede de recojo es la tuya y que dice "pendiente de recojo".', 'multisede-pos' ); ?></li>
-					<li><?php esc_html_e( 'Entrégale la mercadería y elige la acción "Marcar como recogido (Multisede)".', 'multisede-pos' ); ?></li>
+					<li><?php esc_html_e( 'Busca su pedido por el número o por su nombre, y comprueba en la columna "Qué se lleva" que le entregas lo correcto.', 'multisede-pos' ); ?></li>
+					<li><?php esc_html_e( 'Entrégale la mercadería y pulsa "Entregar".', 'multisede-pos' ); ?></li>
 				</ol>
 				<p><?php esc_html_e( 'Ahí el stock baja de verdad y la reserva se cierra. Mientras no lo marques, el sistema sigue creyendo que la mercadería está en la tienda.', 'multisede-pos' ); ?></p>
 				<p><?php esc_html_e( 'Si el cliente nunca viene y se cancela o reembolsa el pedido, la reserva se libera sola y las unidades vuelven a estar a la venta.', 'multisede-pos' ); ?></p>

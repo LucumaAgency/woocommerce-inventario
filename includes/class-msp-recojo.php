@@ -140,26 +140,22 @@ class MSP_Recojo {
 		if ( ! $checkout instanceof WC_Checkout ) {
 			return;
 		}
-		if ( ! class_exists( 'MSP_Cola' ) || ! MSP_Cola::activa() ) {
+
+		// Si el checkout ya tiene un campo de DNI puesto por otro plugin, se usa
+		// ese. Dos inputs pidiendo el mismo documento es peor que ninguno: el
+		// cliente no sabe cuál llenar y acaba poniéndolo en uno solo.
+		if ( self::campo_dni_ajeno() ) {
 			return;
 		}
-
-		$obligatorio = $this->dni_obligatorio();
 
 		woocommerce_form_field(
 			'msp_dni',
 			array(
 				'type'              => 'text',
-				'required'          => $obligatorio,
+				'required'          => true,
 				'class'             => array( 'form-row-wide' ),
-				'label'             => __( 'DNI (para tu boleta)', 'multisede-pos' ),
-				'description'       => $obligatorio
-					? sprintf(
-						/* translators: %s: importe límite. */
-						__( 'Obligatorio: por encima de S/ %s, la boleta tiene que llevar tu documento y tu nombre.', 'multisede-pos' ),
-						number_format( MSP_Comprobante::LIMITE_DNI, 2 )
-					)
-					: __( 'Opcional. Si no lo pones, la boleta sale a nombre de cliente varios.', 'multisede-pos' ),
+				'label'             => __( 'DNI', 'multisede-pos' ),
+				'description'       => __( 'Lo necesitamos para tu boleta y para la entrega.', 'multisede-pos' ),
 				'custom_attributes' => array(
 					'inputmode' => 'numeric',
 					'maxlength' => '8',
@@ -170,15 +166,38 @@ class MSP_Recojo {
 	}
 
 	/**
-	 * ¿El carrito actual obliga a identificar al comprador?
+	 * Nombre del campo de DNI que ya exista en el checkout, si lo hay.
 	 *
-	 * @return bool
+	 * Se busca `billing_dni`, que es el que usan los plugins de checkout
+	 * peruanos (entre ellos el nuestro de Vaporis). Así los dos pueden convivir
+	 * en el mismo sitio sin duplicar el campo.
+	 *
+	 * @return string Nombre del campo, o cadena vacía.
 	 */
-	private function dni_obligatorio() {
-		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
-			return false;
+	public static function campo_dni_ajeno() {
+		if ( ! function_exists( 'WC' ) || ! WC()->checkout() ) {
+			return '';
 		}
-		return round( (float) WC()->cart->get_total( 'edit' ), 2 ) > MSP_Comprobante::LIMITE_DNI;
+
+		$campos = WC()->checkout()->get_checkout_fields( 'billing' );
+
+		return isset( $campos['billing_dni'] ) ? 'billing_dni' : '';
+	}
+
+	/**
+	 * DNI enviado en el checkout, venga del campo que venga.
+	 *
+	 * @return string Solo dígitos.
+	 */
+	private static function dni_enviado() {
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- Woo valida el nonce del checkout.
+		foreach ( array( 'msp_dni', 'billing_dni' ) as $campo ) {
+			if ( isset( $_POST[ $campo ] ) && '' !== trim( (string) wp_unslash( $_POST[ $campo ] ) ) ) {
+				return preg_replace( '/[^0-9]/', '', wp_unslash( $_POST[ $campo ] ) );
+			}
+		}
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
+		return '';
 	}
 
 	/**
@@ -208,45 +227,34 @@ class MSP_Recojo {
 			}
 		}
 
-		if ( ! class_exists( 'MSP_Cola' ) || ! MSP_Cola::activa() ) {
+		// El DNI se pide SIEMPRE, no solo por encima del límite de SUNAT: los
+		// couriers lo exigen para la entrega, y pedirlo unas veces sí y otras no
+		// según el importe del carrito confunde más de lo que ahorra.
+		//
+		// Si otro plugin ya puso su propio campo de DNI, es él quien valida: no
+		// vamos a exigir dos veces el mismo dato.
+		if ( self::campo_dni_ajeno() ) {
 			return;
 		}
 
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Woo valida el nonce del checkout.
-		$dni = isset( $_POST['msp_dni'] ) ? preg_replace( '/[^0-9]/', '', wp_unslash( $_POST['msp_dni'] ) ) : '';
+		$dni = self::dni_enviado();
 
-		if ( '' === $dni && $this->dni_obligatorio() ) {
-			wc_add_notice(
-				sprintf(
-					/* translators: %s: importe límite. */
-					__( 'Para compras de más de S/ %s necesitamos tu DNI para emitir la boleta.', 'multisede-pos' ),
-					number_format( MSP_Comprobante::LIMITE_DNI, 2 )
-				),
-				'error'
-			);
-		} elseif ( '' !== $dni && 8 !== strlen( $dni ) ) {
+		if ( '' === $dni ) {
+			wc_add_notice( __( 'Necesitamos tu DNI para emitir la boleta y para la entrega.', 'multisede-pos' ), 'error' );
+		} elseif ( 8 !== strlen( $dni ) ) {
 			wc_add_notice( __( 'El DNI debe tener 8 dígitos.', 'multisede-pos' ), 'error' );
 		}
 
 		// Identificar al comprador es documento Y nombre. En la web el nombre lo
 		// pide WooCommerce en la facturación, así que esto es solo una red por si
 		// esos campos se hubieran ocultado en el tema o en el constructor.
-		if ( $this->dni_obligatorio() ) {
-			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Woo valida el nonce del checkout.
-			$nombre = isset( $_POST['billing_first_name'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['billing_first_name'] ) ) ) : '';
-			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Woo valida el nonce del checkout.
-			$apellido = isset( $_POST['billing_last_name'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['billing_last_name'] ) ) ) : '';
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- Woo valida el nonce del checkout.
+		$nombre   = isset( $_POST['billing_first_name'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['billing_first_name'] ) ) ) : '';
+		$apellido = isset( $_POST['billing_last_name'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['billing_last_name'] ) ) ) : '';
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
-			if ( '' === $nombre && '' === $apellido ) {
-				wc_add_notice(
-					sprintf(
-						/* translators: %s: importe límite. */
-						__( 'Para compras de más de S/ %s también necesitamos tu nombre completo para la boleta.', 'multisede-pos' ),
-						number_format( MSP_Comprobante::LIMITE_DNI, 2 )
-					),
-					'error'
-				);
-			}
+		if ( '' === $nombre && '' === $apellido ) {
+			wc_add_notice( __( 'Necesitamos tu nombre completo para la boleta.', 'multisede-pos' ), 'error' );
 		}
 	}
 
@@ -267,8 +275,7 @@ class MSP_Recojo {
 		$order->update_meta_data( '_msp_origen', 'web' );
 		$order->update_meta_data( '_msp_recogido', '0' );
 
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Woo valida el nonce del checkout.
-		$dni = isset( $_POST['msp_dni'] ) ? preg_replace( '/[^0-9]/', '', wp_unslash( $_POST['msp_dni'] ) ) : '';
+		$dni = self::dni_enviado();
 		if ( 8 === strlen( $dni ) ) {
 			$order->update_meta_data( '_msp_cliente_tipo_doc', '1' );
 			$order->update_meta_data( '_msp_cliente_num_doc', $dni );

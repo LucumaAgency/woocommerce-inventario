@@ -40,6 +40,10 @@ class MSP_Plugin {
 		$recojo = new MSP_Recojo();
 		$recojo->init();
 
+		// Etiquetas de dirección en peruano (Distrito / Departamento).
+		$checkout_pe = new MSP_Checkout_PE();
+		$checkout_pe->init();
+
 		// Compra por tienda en el frontend (stock de la sede elegida).
 		$frontend = new MSP_Frontend();
 		$frontend->init();

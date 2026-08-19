@@ -62,9 +62,23 @@ class MSP_Recojo {
 	 *
 	 * @param WC_Checkout $checkout Checkout.
 	 */
-	public function campo_checkout( $checkout ) {
+	public function campo_checkout( $checkout = null ) {
 		$sedes = MSP_Sedes::obtener_sedes_recojo();
 		if ( empty( $sedes ) ) {
+			return;
+		}
+
+		// El objeto del checkout se resuelve aquí y NO se confía en el argumento:
+		// cada hook del checkout tiene su propia firma y unos lo pasan y otros
+		// no. `woocommerce_after_order_notes` lo pasa;
+		// `woocommerce_checkout_before_customer_details` no pasa nada, y como
+		// este hook es filtrable (msp_recojo_hook_checkout), el sitio donde se
+		// enganche puede cambiar sin que nadie lo revise. Confiar en el
+		// argumento tumbó la página de pago entera en la v1.9.4.
+		if ( ! $checkout instanceof WC_Checkout ) {
+			$checkout = function_exists( 'WC' ) ? WC()->checkout() : null;
+		}
+		if ( ! $checkout ) {
 			return;
 		}
 
@@ -123,6 +137,9 @@ class MSP_Recojo {
 	 * @param WC_Checkout $checkout Objeto del checkout.
 	 */
 	private function campo_dni( $checkout ) {
+		if ( ! $checkout instanceof WC_Checkout ) {
+			return;
+		}
 		if ( ! class_exists( 'MSP_Cola' ) || ! MSP_Cola::activa() ) {
 			return;
 		}

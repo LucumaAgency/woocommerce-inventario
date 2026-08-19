@@ -326,15 +326,39 @@ class MSP_Ticket {
 
 <?php if ( $qr && '' !== $c['hash'] ) : ?>
 	<div class="qr"><?php echo $qr; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- SVG generado por la librería de QR. ?></div>
+	<script>window.sessionStorage.removeItem( 'msp-ticket-<?php echo (int) $c['id']; ?>' );</script>
 <?php else : ?>
 	<?php /* El QR lleva el hash de la firma, que no existe hasta que el
 	         comprobante se firma y se envía. Imprimir un QR sin él daría un
 	         código que el verificador de SUNAT no reconoce, que es peor que no
 	         ponerlo: el cliente creería tener algo comprobable. */ ?>
-	<div class="legal" style="margin-top:8px">
-		<strong><?php esc_html_e( 'El código QR aparece cuando SUNAT confirma la boleta.', 'multisede-pos' ); ?></strong><br>
-		<?php esc_html_e( 'Suele tardar unos segundos: recarga esta página antes de imprimir.', 'multisede-pos' ); ?>
+	<div class="legal" id="msp-esperando" style="margin-top:8px">
+		<strong><?php esc_html_e( 'Esperando la confirmación de SUNAT para el código QR…', 'multisede-pos' ); ?></strong><br>
+		<span id="msp-espera-detalle"><?php esc_html_e( 'Suele tardar unos segundos. Esta página se actualiza sola.', 'multisede-pos' ); ?></span>
 	</div>
+	<script>
+	/* Se recarga sola hasta que exista el hash de la firma, en vez de dejar al
+	   cajero adivinar cuándo recargar. Con tope: si SUNAT no responde en un par
+	   de minutos, deja de intentarlo y lo dice, para no tener una pestaña
+	   recargándose sola toda la tarde en el mostrador. */
+	( function () {
+		var MAX = 40, ESPERA = 3000;
+		var clave = 'msp-ticket-<?php echo (int) $c['id']; ?>';
+		var n = parseInt( window.sessionStorage.getItem( clave ) || '0', 10 );
+
+		if ( n >= MAX ) {
+			window.sessionStorage.removeItem( clave );
+			document.getElementById( 'msp-espera-detalle' ).textContent =
+				<?php echo wp_json_encode( __( 'SUNAT no ha respondido todavía. Revisa la pantalla de Comprobantes: la boleta es válida igual, el QR se puede imprimir después.', 'multisede-pos' ) ); ?>;
+			return;
+		}
+
+		window.setTimeout( function () {
+			window.sessionStorage.setItem( clave, n + 1 );
+			window.location.reload();
+		}, ESPERA );
+	} )();
+	</script>
 <?php endif; ?>
 
 <div class="legal">

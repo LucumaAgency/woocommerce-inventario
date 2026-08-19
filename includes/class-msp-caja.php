@@ -1081,6 +1081,25 @@ class MSP_Caja {
 			echo '<td>' . wp_kses_post( wc_price( $total ) ) . '</td>';
 
 			echo '<td>';
+
+			// Reimprimir el ticket desde aquí: es la única pantalla donde el
+			// cajero puede llegar a sus ventas. `Caja → Comprobantes` exige
+			// msp_ver_reportes y muestra los comprobantes de todas las tiendas,
+			// así que no es sitio para el mostrador; pero sin esto, una
+			// impresora atascada o un cliente que vuelve a los diez minutos
+			// dejaban al cajero sin forma de sacar el papel.
+			$comprobante = class_exists( 'MSP_Comprobante' )
+				? MSP_Comprobante::obtener_por_pedido( $pedido->get_id() )
+				: null;
+
+			if ( $comprobante && 'aceptado' === $comprobante['estado'] ) {
+				printf(
+					'<a class="button button-small" target="_blank" rel="noopener" href="%1$s">%2$s</a> ',
+					esc_url( MSP_Ticket::url( (int) $comprobante['id'] ) ),
+					esc_html__( 'Ticket', 'multisede-pos' )
+				);
+			}
+
 			if ( $puede_anular && ! $anulado ) {
 				// Un formulario por fila: así el número de pedido viaja sin
 				// depender de JavaScript para elegir cuál se anula.

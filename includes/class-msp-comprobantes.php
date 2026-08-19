@@ -163,6 +163,24 @@ class MSP_Comprobantes {
 	}
 
 	/**
+	 * Etiqueta del estado de baja de un comprobante.
+	 *
+	 * @param string $baja Estado guardado.
+	 * @return array {texto, color} o array vacío si no aplica.
+	 */
+	private function pinta_baja( $baja ) {
+		$mapa = array(
+			'pendiente'      => array( __( 'Baja pendiente', 'multisede-pos' ), '#996800' ),
+			'enviada'        => array( __( 'Baja enviada', 'multisede-pos' ), '#996800' ),
+			'anulado'        => array( __( 'ANULADO ante SUNAT', 'multisede-pos' ), '#50575e' ),
+			'rechazada'      => array( __( 'SUNAT rechazó la baja', 'multisede-pos' ), '#b32d2e' ),
+			'fuera_de_plazo' => array( __( 'Fuera de plazo: requiere nota de crédito', 'multisede-pos' ), '#b32d2e' ),
+			'no_aplica'      => array( __( 'Anulada antes de emitirse', 'multisede-pos' ), '#50575e' ),
+		);
+		return isset( $mapa[ $baja ] ) ? $mapa[ $baja ] : array();
+	}
+
+	/**
 	 * URL de una acción con su nonce.
 	 *
 	 * @param string $accion Acción.
@@ -364,7 +382,15 @@ class MSP_Comprobantes {
 								<?php if ( $c['ultimo_error'] ) : ?>
 									<br><small style="color:#b32d2e"><?php echo esc_html( $c['ultimo_error'] ); ?></small>
 								<?php endif; ?>
-								<?php if ( ! empty( $c['proximo_intento'] ) ) : ?>
+								<?php
+							$baja = $this->pinta_baja( $c['baja_estado'] );
+							if ( $baja ) :
+								?>
+								<br><span style="color:<?php echo esc_attr( $baja[1] ); ?>;font-weight:600">
+									<?php echo esc_html( $baja[0] ); ?>
+								</span>
+							<?php endif; ?>
+							<?php if ( ! empty( $c['proximo_intento'] ) ) : ?>
 									<br><small><?php
 										printf(
 											/* translators: %s: fecha y hora. */
@@ -392,6 +418,8 @@ class MSP_Comprobantes {
 				</tbody>
 			</table>
 
+			<?php $this->tabla_resumenes(); ?>
+
 			<?php
 			$paginas = (int) ceil( $datos['total'] / self::POR_PAGINA );
 			if ( $paginas > 1 ) :
@@ -414,6 +442,86 @@ class MSP_Comprobantes {
 				</div></div>
 			<?php endif; ?>
 		</div>
+		<?php
+	}
+
+	/**
+	 * Tabla de resúmenes diarios (las bajas comunicadas a SUNAT).
+	 */
+	private function tabla_resumenes() {
+		if ( ! class_exists( 'MSP_Resumen' ) ) {
+			return;
+		}
+
+		$resumenes = MSP_Resumen::ultimos( 20 );
+		if ( ! $resumenes ) {
+			return;
+		}
+
+		$mapa = array(
+			'pendiente' => array( __( 'Por enviar', 'multisede-pos' ), '#996800' ),
+			'enviado'   => array( __( 'Esperando a SUNAT', 'multisede-pos' ), '#996800' ),
+			'aceptado'  => array( __( 'Aceptado', 'multisede-pos' ), '#1a7f37' ),
+			'rechazado' => array( __( 'Rechazado', 'multisede-pos' ), '#b32d2e' ),
+			'error'     => array( __( 'Reintentando', 'multisede-pos' ), '#996800' ),
+		);
+		?>
+		<h2 style="margin-top:32px"><?php esc_html_e( 'Bajas comunicadas a SUNAT', 'multisede-pos' ); ?></h2>
+		<p class="description" style="max-width:70ch">
+			<?php esc_html_e( 'Una boleta no se borra: se comunica su baja en un resumen diario. El envío es asíncrono, así que un resumen pasa por "esperando a SUNAT" antes de resolverse; es normal.', 'multisede-pos' ); ?>
+		</p>
+		<table class="widefat striped" style="max-width:900px">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'Resumen', 'multisede-pos' ); ?></th>
+					<th><?php esc_html_e( 'Comprobantes del día', 'multisede-pos' ); ?></th>
+					<th><?php esc_html_e( 'Estado', 'multisede-pos' ); ?></th>
+					<th><?php esc_html_e( 'CDR', 'multisede-pos' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $resumenes as $r ) : ?>
+					<?php $pinta = isset( $mapa[ $r['estado'] ] ) ? $mapa[ $r['estado'] ] : array( $r['estado'], '#50575e' ); ?>
+					<tr>
+						<td>
+							<strong><?php echo esc_html( $r['identificador'] ); ?></strong><br>
+							<small><?php echo esc_html( $r['creado_at'] ); ?></small>
+						</td>
+						<td>
+							<?php
+							$numeros = array();
+							foreach ( MSP_Resumen::comprobantes( (int) $r['id'] ) as $c ) {
+								$numeros[] = MSP_Comprobante::numero( $c );
+							}
+							echo esc_html( $numeros ? implode( ', ', $numeros ) : '—' );
+							?>
+						</td>
+						<td>
+							<span style="color:<?php echo esc_attr( $pinta[1] ); ?>;font-weight:600"><?php echo esc_html( $pinta[0] ); ?></span>
+							<?php if ( $r['ultimo_error'] ) : ?>
+								<br><small style="color:#b32d2e"><?php echo esc_html( $r['ultimo_error'] ); ?></small>
+							<?php endif; ?>
+							<?php if ( $r['ticket'] ) : ?>
+								<br><small><?php
+									printf(
+										/* translators: %s: número de ticket de SUNAT. */
+										esc_html__( 'Ticket %s', 'multisede-pos' ),
+										esc_html( $r['ticket'] )
+									);
+								?></small>
+							<?php endif; ?>
+						</td>
+						<td>
+							<?php if ( $r['cdr_path'] ) : ?>
+								✅
+							<?php else : ?>
+								—
+							<?php endif; ?>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
 		<?php
 	}
 }

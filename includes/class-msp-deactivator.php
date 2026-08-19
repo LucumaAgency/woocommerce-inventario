@@ -25,5 +25,8 @@ class MSP_Deactivator {
 		if ( class_exists( 'MSP_Cola' ) ) {
 			MSP_Cola::limpiar();
 		}
+		if ( class_exists( 'MSP_Baja' ) ) {
+			MSP_Baja::limpiar();
+		}
 	}
 }

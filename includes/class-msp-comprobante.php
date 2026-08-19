@@ -249,6 +249,20 @@ class MSP_Comprobante {
 			$formatos[]         = '%d';
 		}
 
+		// Campos de la baja (Fase 4).
+		if ( array_key_exists( 'baja_estado', $datos ) ) {
+			$campos['baja_estado'] = sanitize_key( $datos['baja_estado'] );
+			$formatos[]            = '%s';
+		}
+		if ( array_key_exists( 'anulado_at', $datos ) ) {
+			$campos['anulado_at'] = $datos['anulado_at'] ? $datos['anulado_at'] : null;
+			$formatos[]           = '%s';
+		}
+		if ( array_key_exists( 'resumen_id', $datos ) ) {
+			$campos['resumen_id'] = (int) $datos['resumen_id'];
+			$formatos[]           = '%d';
+		}
+
 		if ( ! $campos ) {
 			return false;
 		}

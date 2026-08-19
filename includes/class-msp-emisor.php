@@ -440,6 +440,224 @@ class MSP_Emisor {
 	}
 
 	/**
+	 * Envía un resumen diario y guarda el ticket que devuelve SUNAT.
+	 *
+	 * El resumen es asíncrono: SUNAT no responde si lo aceptó, responde un
+	 * **ticket** y sigue procesando por su cuenta. El resultado se consulta
+	 * después con `consultar_ticket()`. Por eso el estado del resumen distingue
+	 * "enviado" (tenemos ticket, falta saber) de "aceptado".
+	 *
+	 * @param int $resumen_id ID del resumen.
+	 * @return array|WP_Error Fila actualizada, o error.
+	 */
+	public static function enviar_resumen( $resumen_id ) {
+		$r = MSP_Resumen::obtener( $resumen_id );
+		if ( ! $r ) {
+			return new WP_Error( 'msp_no_existe', __( 'El resumen no existe.', 'multisede-pos' ) );
+		}
+		if ( in_array( $r['estado'], array( 'aceptado', 'rechazado' ), true ) ) {
+			return new WP_Error( 'msp_resumen_cerrado', __( 'Ese resumen ya tiene respuesta de SUNAT.', 'multisede-pos' ) );
+		}
+
+		$see = self::see();
+		if ( is_wp_error( $see ) ) {
+			return self::anotar_fallo_resumen( $resumen_id, $see );
+		}
+
+		$documento = self::armar_resumen( $r );
+		if ( is_wp_error( $documento ) ) {
+			return self::anotar_fallo_resumen( $resumen_id, $documento );
+		}
+
+		if ( ! empty( self::ajustes()['simular_fallo'] ) && ! self::es_produccion() ) {
+			return self::anotar_fallo_resumen(
+				$resumen_id,
+				new WP_Error( 'msp_fallo_simulado', __( 'Fallo de envío simulado (interruptor de pruebas activo).', 'multisede-pos' ) )
+			);
+		}
+
+		try {
+			$xml = $see->getXmlSigned( $documento );
+			$res = $see->send( $documento );
+		} catch ( \Exception $e ) {
+			return self::anotar_fallo_resumen( $resumen_id, new WP_Error( 'msp_excepcion', $e->getMessage() ) );
+		}
+
+		$datos = array( 'enviado_at' => current_time( 'mysql' ) );
+
+		$ruta = self::guardar_archivo_suelto( $r['identificador'], $xml );
+		if ( $ruta ) {
+			$datos['xml_path'] = $ruta;
+		}
+
+		if ( ! $res || ! $res->isSuccess() ) {
+			$err = $res ? $res->getError() : null;
+			return self::anotar_fallo_resumen(
+				$resumen_id,
+				new WP_Error(
+					'msp_envio',
+					$err ? sprintf( '[%s] %s', $err->getCode(), $err->getMessage() ) : __( 'SUNAT no devolvió respuesta.', 'multisede-pos' )
+				),
+				$datos
+			);
+		}
+
+		$datos['estado']       = 'enviado';
+		$datos['ticket']       = (string) $res->getTicket();
+		$datos['ultimo_error'] = '';
+		MSP_Resumen::actualizar( $resumen_id, $datos );
+
+		return MSP_Resumen::obtener( $resumen_id );
+	}
+
+	/**
+	 * Pregunta a SUNAT por el resultado de un resumen ya enviado.
+	 *
+	 * Códigos de SUNAT: 0 procesado, 98 en proceso, 99 con errores. El 98 no es
+	 * un fallo: significa "todavía estoy en ello", y hay que volver a preguntar.
+	 *
+	 * @param int $resumen_id ID del resumen.
+	 * @return array|WP_Error
+	 */
+	public static function consultar_ticket( $resumen_id ) {
+		$r = MSP_Resumen::obtener( $resumen_id );
+		if ( ! $r || '' === $r['ticket'] ) {
+			return new WP_Error( 'msp_sin_ticket', __( 'Ese resumen todavía no tiene ticket.', 'multisede-pos' ) );
+		}
+
+		$see = self::see();
+		if ( is_wp_error( $see ) ) {
+			return self::anotar_fallo_resumen( $resumen_id, $see );
+		}
+
+		try {
+			$res = $see->getStatus( $r['ticket'] );
+		} catch ( \Exception $e ) {
+			return self::anotar_fallo_resumen( $resumen_id, new WP_Error( 'msp_excepcion', $e->getMessage() ) );
+		}
+
+		$code = $res ? (string) $res->getCode() : '';
+
+		if ( '98' === $code ) {
+			// En proceso. No es error: se vuelve a preguntar más tarde.
+			return new WP_Error( 'msp_en_proceso', __( 'SUNAT sigue procesando el resumen.', 'multisede-pos' ) );
+		}
+
+		$datos = array();
+		$cdr   = method_exists( $res, 'getCdrZip' ) ? $res->getCdrZip() : null;
+		if ( $cdr ) {
+			$ruta = self::guardar_archivo_suelto( 'R-' . $r['identificador'], $cdr, 'zip' );
+			if ( $ruta ) {
+				$datos['cdr_path'] = $ruta;
+			}
+		}
+
+		if ( '0' === $code ) {
+			$datos['estado']       = 'aceptado';
+			$datos['ultimo_error'] = '';
+			$datos['proximo_intento'] = null;
+			MSP_Resumen::actualizar( $resumen_id, $datos );
+			return MSP_Resumen::obtener( $resumen_id );
+		}
+
+		// 99 u otro: SUNAT lo procesó y lo rechazó. No se reintenta a ciegas,
+		// igual que con las boletas: el mismo contenido daría el mismo rechazo.
+		$err                      = $res ? $res->getError() : null;
+		$datos['estado']          = 'rechazado';
+		$datos['ultimo_error']    = $err ? sprintf( '[%s] %s', $err->getCode(), $err->getMessage() ) : sprintf( '[%s]', $code );
+		$datos['proximo_intento'] = null;
+		MSP_Resumen::actualizar( $resumen_id, $datos );
+
+		return new WP_Error( 'msp_resumen_rechazado', $datos['ultimo_error'] );
+	}
+
+	/**
+	 * Arma el resumen diario de Greenter a partir de la fila y sus comprobantes.
+	 *
+	 * @param array $r Fila del resumen.
+	 * @return \Greenter\Model\Summary\Summary|WP_Error
+	 */
+	private static function armar_resumen( $r ) {
+		$comprobantes = MSP_Resumen::comprobantes( (int) $r['id'] );
+		if ( ! $comprobantes ) {
+			return new WP_Error( 'msp_resumen_vacio', __( 'El resumen no tiene comprobantes que comunicar.', 'multisede-pos' ) );
+		}
+
+		$a       = self::ajustes();
+		$empresa = ( new \Greenter\Model\Company\Company() )
+			->setRuc( $a['ruc'] )
+			->setRazonSocial( $a['razon_social'] );
+
+		$detalles = array();
+		foreach ( $comprobantes as $c ) {
+			$total = round( (float) $c['total'], 2 );
+			$igv   = round( (float) $c['igv'], 2 );
+
+			$detalles[] = ( new \Greenter\Model\Summary\SummaryDetail() )
+				->setTipoDoc( '03' )
+				->setSerieNro( MSP_Comprobante::numero( $c ) )
+				->setEstado( '3' ) // 1 informar, 2 corregir, 3 ANULAR.
+				->setClienteTipo( $c['cliente_num_doc'] ? '1' : '0' )
+				->setClienteNro( $c['cliente_num_doc'] ? $c['cliente_num_doc'] : '-' )
+				->setTotal( $total )
+				->setMtoOperGravadas( round( $total - $igv, 2 ) )
+				->setMtoIGV( $igv );
+		}
+
+		$zona = new DateTimeZone( wp_timezone_string() );
+
+		return ( new \Greenter\Model\Summary\Summary() )
+			->setFecGeneracion( new DateTime( 'now', $zona ) )
+			->setFecResumen( new DateTime( $r['fecha_referencia'], $zona ) )
+			->setCorrelativo( (string) (int) $r['correlativo'] )
+			->setMoneda( 'PEN' )
+			->setCompany( $empresa )
+			->setDetails( $detalles );
+	}
+
+	/**
+	 * Guarda un archivo en la carpeta de conservación.
+	 *
+	 * @param string $nombre    Nombre base.
+	 * @param string $contenido Contenido.
+	 * @param string $ext       Extensión.
+	 * @return string Ruta guardada, o cadena vacía.
+	 */
+	private static function guardar_archivo_suelto( $nombre, $contenido, $ext = 'xml' ) {
+		$dir = self::carpeta_archivos();
+		if ( is_wp_error( $dir ) || ! $contenido ) {
+			return '';
+		}
+
+		$a    = self::ajustes();
+		$ruta = $dir . '/' . $a['ruc'] . '-' . sanitize_file_name( $nombre ) . '.' . $ext;
+
+		return file_put_contents( $ruta, $contenido ) ? $ruta : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions
+	}
+
+	/**
+	 * Deja constancia de un fallo en un resumen.
+	 *
+	 * @param int      $resumen_id ID del resumen.
+	 * @param WP_Error $error      Error.
+	 * @param array    $extra      Campos extra a guardar.
+	 * @return WP_Error
+	 */
+	private static function anotar_fallo_resumen( $resumen_id, $error, $extra = array() ) {
+		MSP_Resumen::actualizar(
+			$resumen_id,
+			array_merge(
+				$extra,
+				array(
+					'estado'       => 'error',
+					'ultimo_error' => substr( $error->get_error_message(), 0, 1000 ),
+				)
+			)
+		);
+		return $error;
+	}
+
+	/**
 	 * Extrae el valor de la firma del XML, para el QR de la Fase 5.
 	 *
 	 * @param string $xml XML firmado.

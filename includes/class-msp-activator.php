@@ -17,7 +17,7 @@ class MSP_Activator {
 	/**
 	 * Versión del esquema de base de datos.
 	 */
-	const DB_VERSION = '5';
+	const DB_VERSION = '6';
 
 	/**
 	 * Aplica el esquema si cambió desde la última vez.
@@ -156,6 +156,9 @@ class MSP_Activator {
 			hash VARCHAR(64) NOT NULL DEFAULT '',
 			proximo_intento DATETIME NULL DEFAULT NULL,
 			alertado_at DATETIME NULL DEFAULT NULL,
+			baja_estado VARCHAR(20) NOT NULL DEFAULT '',
+			resumen_id BIGINT(20) UNSIGNED NULL DEFAULT NULL,
+			anulado_at DATETIME NULL DEFAULT NULL,
 			xml_path VARCHAR(255) NOT NULL DEFAULT '',
 			cdr_path VARCHAR(255) NOT NULL DEFAULT '',
 			pdf_url VARCHAR(255) NOT NULL DEFAULT '',
@@ -166,6 +169,33 @@ class MSP_Activator {
 			KEY pedido_id (pedido_id),
 			KEY sede_id (sede_id),
 			KEY estado (estado),
+			KEY proximo_intento (proximo_intento),
+			KEY baja_estado (baja_estado)
+		) {$charset_collate};";
+
+		// Resúmenes diarios (Fase 4). Una boleta no se borra: se comunica su
+		// baja en un resumen diario donde va listada con estado 3. El envío es
+		// asíncrono —SUNAT devuelve un ticket y el resultado se consulta
+		// después—, así que el ticket vive aquí junto con su estado.
+		$sql_resumenes = "CREATE TABLE {$prefix}msp_resumenes (
+			id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+			entorno VARCHAR(12) NOT NULL DEFAULT 'beta',
+			identificador VARCHAR(20) NOT NULL,
+			fecha_referencia DATE NOT NULL,
+			correlativo INT(11) UNSIGNED NOT NULL DEFAULT 1,
+			estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+			ticket VARCHAR(64) NOT NULL DEFAULT '',
+			intentos INT(11) NOT NULL DEFAULT 0,
+			ultimo_error TEXT NULL DEFAULT NULL,
+			proximo_intento DATETIME NULL DEFAULT NULL,
+			alertado_at DATETIME NULL DEFAULT NULL,
+			xml_path VARCHAR(255) NOT NULL DEFAULT '',
+			cdr_path VARCHAR(255) NOT NULL DEFAULT '',
+			creado_at DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
+			enviado_at DATETIME NULL DEFAULT NULL,
+			PRIMARY KEY  (id),
+			UNIQUE KEY entorno_identificador (entorno, identificador),
+			KEY estado (estado),
 			KEY proximo_intento (proximo_intento)
 		) {$charset_collate};";
 
@@ -173,6 +203,7 @@ class MSP_Activator {
 		dbDelta( $sql_caja_sesiones );
 		dbDelta( $sql_caja_movimientos );
 		dbDelta( $sql_comprobantes );
+		dbDelta( $sql_resumenes );
 
 		self::migrar_indice_comprobantes();
 	}

@@ -58,6 +58,10 @@ class MSP_Plugin {
 		$cola = new MSP_Cola();
 		$cola->init();
 
+		// Bajas de comprobantes (Fase 4): la contraparte de la cola.
+		$baja = new MSP_Baja();
+		$baja->init();
+
 		// Pantallas de solo-admin: inventario, asistente y ayuda.
 		if ( is_admin() ) {
 			$comprobantes = new MSP_Comprobantes();

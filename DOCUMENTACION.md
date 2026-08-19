@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.9.7
+- **Versión actual:** 1.10.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -327,7 +327,15 @@ Decide **cuándo** se emite. Regla del módulo: **la emisión nunca ocurre dentr
 ### MSP_Comprobantes (pantalla, v1.9.0)
 `Caja → Comprobantes`, con capacidad `msp_ver_reportes`. Listado con filtros por estado, tienda y número; reintento manual; descarga del XML firmado y del CDR (servidos desde PHP, con la ruta anclada a la carpeta del módulo). Sin esta pantalla la cola sería una caja negra.
 
-**Roadmap de facturación** (plan completo: `PLAN-BOLETAS.md` en la carpeta del cliente): F1 base ✓ · F2 Greenter + emisión ✓ · F3 cola/reintentos/pantalla Comprobantes ✓ · F4 anulaciones (resumen diario) · F5 ticket con QR + PDF.
+### MSP_Baja y MSP_Resumen (Fase 4 de boletas — v1.10.0)
+Una boleta no se borra: se comunica su **baja** listándola en un **resumen diario** con estado `3` (1 = informar, 2 = corregir, 3 = anular). Sin esto, anular una venta devuelve stock y efectivo pero **para SUNAT la boleta sigue siendo válida**, y saraih pagaría IGV de una venta que no ocurrió.
+
+- `MSP_Baja::marcar( $order )` — engancha `msp_pos_venta_anulada` y la cancelación/reembolso de pedidos. Tres reglas: si la boleta **no llegó a ser aceptada** no hay baja que comunicar (SUNAT nunca supo de ella); no se marca dos veces; y si pasaron los **7 días** de plazo se marca `fuera_de_plazo`, porque entonces hace falta una nota de crédito.
+- `agrupar_y_enviar()` — agrupa las bajas por **fecha de emisión** de los comprobantes, no por la fecha en que se anularon: el resumen informa de los comprobantes de un día concreto. Los comprobantes se enganchan al resumen *antes* del envío, para que un proceso muerto a mitad no los reparta en dos resúmenes.
+- `enviar()` / `consultar()` — el ciclo asíncrono: `sendSummary` devuelve un **ticket** y el resultado se pregunta después con `getStatus`. El código `98` de SUNAT significa "en proceso" y se reintenta; el `0` acepta y el `99` rechaza (y un rechazo no se reintenta solo, igual que en las boletas).
+- `MSP_Resumen` — tabla `wp_msp_resumenes`, correlativo por día (`RC-20260818-1`) con el mismo patrón de índice único que los correlativos de boleta, y `dias_de_plazo()`.
+
+**Roadmap de facturación** (plan completo: `PLAN-BOLETAS.md` en la carpeta del cliente): F1 base ✓ · F2 Greenter + emisión ✓ · F3 cola/reintentos/pantalla Comprobantes ✓ · F4 anulaciones (resumen diario) ✓ · F5 ticket con QR + PDF.
 
 ---
 

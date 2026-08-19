@@ -528,6 +528,26 @@ class MSP_Caja {
 	}
 
 	/**
+	 * ¿Falta caja abierta para cobrar con este método?
+	 *
+	 * Solo el efectivo la exige: es el único que mete dinero en el cajón, y sin
+	 * turno abierto ese dinero no queda registrado en ninguna parte. Con tarjeta
+	 * o Yape no hay efectivo que controlar, así que exigirla sería fricción sin
+	 * contrapartida.
+	 *
+	 * @param string $metodo    Método de pago del POS.
+	 * @param int    $sede_id   Sede.
+	 * @param int    $cajero_id Usuario.
+	 * @return bool True si hay que bloquear el cobro.
+	 */
+	public static function falta_caja_para( $metodo, $sede_id, $cajero_id ) {
+		if ( ! self::es_efectivo( $metodo ) ) {
+			return false;
+		}
+		return ! self::sesion_abierta( (int) $sede_id, (int) $cajero_id );
+	}
+
+	/**
 	 * ¿Esa venta pertenece a este turno de caja?
 	 *
 	 * Se comprueba contra la lista real de ventas de la sesión —misma sede,

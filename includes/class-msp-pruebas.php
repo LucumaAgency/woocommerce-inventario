@@ -103,6 +103,9 @@ class MSP_Pruebas {
 			case 'comprobar_permisos':
 				$aviso = $this->comprobar_permisos();
 				break;
+			case 'comprobar_reglas':
+				$aviso = $this->comprobar_reglas();
+				break;
 			case 'stock_uno':
 				$aviso = $this->escenario_stock_uno( $sede_id );
 				break;
@@ -618,6 +621,216 @@ class MSP_Pruebas {
 	}
 
 	/**
+	 * Comprueba las reglas de caja, stock y campos del checkout.
+	 *
+	 * Cubre los casos 45, 46, 50 y 52, y la mitad del 57. Lo que **no** puede
+	 * cubrir es la maquetación: que el checkout salga a dos columnas con el
+	 * recojo encima de facturación es cosa del tema, y eso se mira.
+	 *
+	 * Todas las comprobaciones son de solo lectura salvo la del stock, que toca
+	 * un producto y lo deja como estaba.
+	 *
+	 * @return string Resultado.
+	 */
+	private function comprobar_reglas() {
+		global $wpdb;
+
+		$lineas = array();
+		$fallos = 0;
+
+		// ── 45/46 · El efectivo esperado de la lista es el del cierre ────────
+		$abiertas = MSP_Cajas_Abiertas::abiertas();
+		$descuadre = array();
+
+		foreach ( $abiertas as $sesion ) {
+			$t          = MSP_Caja::totales( $sesion->id );
+			$a_mano     = (float) $sesion->monto_apertura + $t['ingresos'] + $t['ventas'] - $t['egresos'];
+			if ( abs( $a_mano - MSP_Caja::esperado( $sesion ) ) > 0.001 ) {
+				$descuadre[] = (int) $sesion->id;
+			}
+		}
+
+		if ( ! $abiertas ) {
+			$lineas[] = '⚪ 45 · ' . __( 'no hay cajas abiertas que listar.', 'multisede-pos' );
+		} elseif ( $descuadre ) {
+			$lineas[] = sprintf( '❌ 45 · ' . __( 'el esperado no cuadra en las sesiones: %s', 'multisede-pos' ), implode( ', ', $descuadre ) );
+			$fallos++;
+		} else {
+			$lineas[] = sprintf(
+				/* translators: %d: número de cajas. */
+				'✅ 45 · ' . _n( '%d caja abierta listada, con el esperado bien calculado.', '%d cajas abiertas listadas, con el esperado bien calculado.', count( $abiertas ), 'multisede-pos' ),
+				count( $abiertas )
+			);
+		}
+
+		// 46 · Lo que se guardó al cerrar es lo que se veía antes de cerrar.
+		$cerradas = (array) $wpdb->get_results(
+			"SELECT * FROM " . MSP_Caja::tabla_sesiones() . " WHERE estado = 'cerrada' AND es_practica = 0 ORDER BY id DESC LIMIT 5" // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		);
+
+		if ( ! $cerradas ) {
+			$lineas[] = '⚪ 46 · ' . __( 'no hay cierres con los que comparar el esperado.', 'multisede-pos' );
+		} else {
+			$mal = array();
+			foreach ( $cerradas as $c ) {
+				if ( abs( (float) $c->monto_cierre_esperado - MSP_Caja::esperado( $c ) ) > 0.001 ) {
+					$mal[] = (int) $c->id;
+				}
+			}
+			if ( $mal ) {
+				$lineas[] = sprintf( '❌ 46 · ' . __( 'el esperado guardado al cerrar no coincide con el recalculado en: %s', 'multisede-pos' ), implode( ', ', $mal ) );
+				$fallos++;
+			} else {
+				$lineas[] = '✅ 46 · ' . __( 'gerencia y cajero ven la misma cifra: el esperado del cierre coincide con el de la lista.', 'multisede-pos' );
+			}
+		}
+
+		// 46 bis · Las cajas de práctica no se cuentan como dinero real.
+		$practicas = (int) $wpdb->get_var(
+			"SELECT COUNT(*) FROM " . MSP_Caja::tabla_sesiones() . " WHERE estado = 'abierta' AND es_practica = 1" // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		);
+		$colada = false;
+		foreach ( $abiertas as $sesion ) {
+			if ( (int) $sesion->es_practica ) {
+				$colada = true;
+			}
+		}
+
+		if ( $colada ) {
+			$lineas[] = '❌ 46 bis · ' . __( 'una caja de PRÁCTICA aparece como dinero real.', 'multisede-pos' );
+			$fallos++;
+		} elseif ( $practicas ) {
+			$lineas[] = sprintf(
+				/* translators: %d: cajas de práctica abiertas. */
+				'✅ 46 bis · ' . __( 'hay %d caja(s) de práctica abiertas y ninguna se cuela en la lista.', 'multisede-pos' ),
+				$practicas
+			);
+		} else {
+			$lineas[] = '⚪ 46 bis · ' . __( 'no hay cajas de práctica abiertas con las que probarlo.', 'multisede-pos' );
+		}
+
+		// ── 52 · Solo el efectivo exige caja ─────────────────────────────────
+		// Con una sede inventada nadie tiene turno abierto, así que se ve la
+		// regla limpia sin tocar las cajas de verdad.
+		$sede_fantasma = 999999999;
+		$uid           = get_current_user_id();
+		$bloquea_efectivo = MSP_Caja::falta_caja_para( 'efectivo', $sede_fantasma, $uid );
+		$bloquea_yape     = MSP_Caja::falta_caja_para( 'yape_plin', $sede_fantasma, $uid );
+
+		if ( $bloquea_efectivo && ! $bloquea_yape ) {
+			$lineas[] = '✅ 52 · ' . __( 'sin caja abierta: el efectivo se bloquea y Yape pasa.', 'multisede-pos' );
+		} else {
+			$lineas[] = sprintf(
+				'❌ 52 · ' . __( 'efectivo bloqueado: %1$s · Yape bloqueado: %2$s (se esperaba sí / no).', 'multisede-pos' ),
+				$bloquea_efectivo ? 'sí' : 'no',
+				$bloquea_yape ? 'sí' : 'no'
+			);
+			$fallos++;
+		}
+
+		// ── 50 · La reserva web no puede pasarse del stock ───────────────────
+		$sede_id = (int) $wpdb->get_var( "SELECT sede_id FROM " . MSP_Stock::tabla() . " WHERE stock > 0 LIMIT 1" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$prod_id = $sede_id ? $this->producto_con_stock( $sede_id ) : 0;
+
+		if ( ! $prod_id ) {
+			$lineas[] = '⚪ 50 · ' . __( 'no hay productos con stock para probar la reserva.', 'multisede-pos' );
+		} else {
+			$antes = MSP_Stock::get( $prod_id, $sede_id );
+
+			MSP_Stock::set( $prod_id, $sede_id, 1 );
+			$primera = MSP_Stock::reservar_si_hay( $prod_id, $sede_id, 1 );
+			$segunda = MSP_Stock::reservar_si_hay( $prod_id, $sede_id, 1 );
+
+			// Se deja el producto exactamente como estaba.
+			if ( $primera ) {
+				MSP_Stock::liberar_reserva( $prod_id, $sede_id, 1 );
+			}
+			if ( $segunda ) {
+				MSP_Stock::liberar_reserva( $prod_id, $sede_id, 1 );
+			}
+			MSP_Stock::set( $prod_id, $sede_id, $antes ? (int) $antes->stock : 0 );
+			MSP_Stock::sincronizar_woo( $prod_id );
+
+			if ( $primera && ! $segunda ) {
+				$lineas[] = '✅ 50 · ' . __( 'con 1 unidad, la primera reserva entra y la segunda se rechaza: no hay sobreventa.', 'multisede-pos' );
+			} else {
+				$lineas[] = sprintf(
+					'❌ 50 · ' . __( 'primera reserva: %1$s · segunda: %2$s (se esperaba sí / no).', 'multisede-pos' ),
+					$primera ? 'sí' : 'no',
+					$segunda ? 'sí' : 'no'
+				);
+				$fallos++;
+			}
+		}
+
+		// ── 57 · Campos del checkout (la maquetación se mira aparte) ─────────
+		if ( ! function_exists( 'WC' ) || ! WC()->checkout() ) {
+			$lineas[] = '⚪ 57 · ' . __( 'no se pudo leer el checkout.', 'multisede-pos' );
+		} else {
+			$campos = WC()->checkout()->get_checkout_fields( 'billing' );
+			$dnis   = array();
+			foreach ( array_keys( $campos ) as $clave ) {
+				if ( false !== strpos( $clave, 'dni' ) ) {
+					$dnis[] = $clave;
+				}
+			}
+
+			$problemas = array();
+
+			if ( 1 !== count( $dnis ) ) {
+				$problemas[] = sprintf(
+					/* translators: %s: lista de campos. */
+					__( 'campos de DNI encontrados: %s', 'multisede-pos' ),
+					$dnis ? implode( ', ', $dnis ) : '0'
+				);
+			} else {
+				$dni   = $campos[ $dnis[0] ];
+				$email = isset( $campos['billing_email'] ) ? $campos['billing_email'] : null;
+
+				if ( empty( $dni['required'] ) ) {
+					$problemas[] = __( 'el DNI no es obligatorio', 'multisede-pos' );
+				}
+				if ( $email && isset( $dni['priority'], $email['priority'] ) && $dni['priority'] <= $email['priority'] ) {
+					$problemas[] = __( 'el DNI no va después del correo', 'multisede-pos' );
+				}
+			}
+
+			if ( isset( $campos['billing_city']['label'] ) && false === stripos( $campos['billing_city']['label'], 'distrito' ) ) {
+				$problemas[] = sprintf(
+					/* translators: %s: etiqueta actual. */
+					__( 'la ciudad se llama "%s" y no Distrito', 'multisede-pos' ),
+					$campos['billing_city']['label']
+				);
+			}
+			if ( isset( $campos['billing_state']['label'] ) && false === stripos( $campos['billing_state']['label'], 'departamento' ) ) {
+				$problemas[] = sprintf(
+					/* translators: %s: etiqueta actual. */
+					__( 'la región se llama "%s" y no Departamento', 'multisede-pos' ),
+					$campos['billing_state']['label']
+				);
+			}
+
+			if ( $problemas ) {
+				$lineas[] = '❌ 57 · ' . implode( '; ', $problemas );
+				$fallos++;
+			} else {
+				$lineas[] = '✅ 57 · ' . __( 'un solo DNI, obligatorio y después del correo; Distrito y Departamento en su sitio.', 'multisede-pos' );
+			}
+		}
+
+		$cabecera = 0 === $fallos
+			? __( 'Reglas de caja, stock y checkout: todo correcto.', 'multisede-pos' )
+			: sprintf(
+				/* translators: %d: número de fallos. */
+				_n( 'Reglas: %d fallo.', 'Reglas: %d fallos.', $fallos, 'multisede-pos' ),
+				$fallos
+			);
+
+		return $cabecera . ' — ' . implode( ' | ', $lineas ) . ' ⚠️ ' .
+			__( 'Falta mirar a ojo: que el checkout salga a dos columnas con el recojo encima de facturación, y que el menú Pruebas desaparezca con el entorno en producción.', 'multisede-pos' );
+	}
+
+	/**
 	 * Deja un producto con exactamente una unidad disponible en la sede.
 	 *
 	 * @param int $sede_id Sede.
@@ -717,6 +930,18 @@ class MSP_Pruebas {
 				<?php wp_nonce_field( 'msp_pruebas', 'msp_pruebas_nonce' ); ?>
 				<input type="hidden" name="msp_prueba_action" value="comprobar_permisos" />
 				<?php submit_button( __( 'Comprobar permisos', 'multisede-pos' ), 'secondary', 'submit', false ); ?>
+			</form>
+
+			<hr>
+
+			<h2><?php esc_html_e( 'Comprobar caja, stock y checkout', 'multisede-pos' ); ?></h2>
+			<p style="max-width:70ch">
+				<?php esc_html_e( 'Verifica que el efectivo esperado que ve gerencia sea el mismo que ve el cajero al cerrar, que las cajas de práctica no cuenten como dinero real, que solo el efectivo exija caja abierta, que la reserva web no se pase del stock, y que el checkout tenga un solo DNI obligatorio con las etiquetas peruanas.', 'multisede-pos' ); ?>
+			</p>
+			<form method="post">
+				<?php wp_nonce_field( 'msp_pruebas', 'msp_pruebas_nonce' ); ?>
+				<input type="hidden" name="msp_prueba_action" value="comprobar_reglas" />
+				<?php submit_button( __( 'Comprobar reglas', 'multisede-pos' ), 'secondary', 'submit', false ); ?>
 			</form>
 
 			<hr>

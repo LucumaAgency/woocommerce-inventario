@@ -389,7 +389,7 @@ class MSP_POS {
 		//
 		// Se comprueba antes de descontar stock y crear el pedido, igual que el
 		// DNI: si falta, la venta no llega a existir.
-		if ( 'efectivo' === $metodo && ! MSP_Caja::sesion_abierta( $sede_id, get_current_user_id() ) ) {
+		if ( MSP_Caja::falta_caja_para( $metodo, $sede_id, get_current_user_id() ) ) {
 			wp_send_json_error(
 				array(
 					'msg'       => __( 'No tienes la caja abierta en esta tienda. Ábrela para que el efectivo de esta venta quede registrado.', 'multisede-pos' ),

@@ -41,6 +41,10 @@ class MSP_Stock {
 		// Los pedidos con sede los gestiona el plugin (reserva/recojo/POS),
 		// así que desactivamos la reducción automática de stock de Woo para ellos.
 		add_filter( 'woocommerce_can_reduce_order_stock', array( $this, 'evitar_reduccion_woo' ), 10, 2 );
+
+		// Red de seguridad: suelta sola las reservas que perdieron su pedido.
+		add_action( 'init', array( __CLASS__, 'programar_limpieza' ) );
+		add_action( 'msp_limpiar_reservas', array( __CLASS__, 'limpiar_reservas_huerfanas' ) );
 		// Columna de stock por sede en el listado de productos.
 		add_filter( 'manage_edit-product_columns', array( $this, 'columna_listado' ), 20 );
 		add_action( 'manage_product_posts_custom_column', array( $this, 'columna_contenido' ), 20, 2 );
@@ -374,15 +378,27 @@ class MSP_Stock {
 	 * @param int $sede_id Sede.
 	 * @return array Mapa producto_id => unidades huérfanas (solo los que sobran).
 	 */
-	public static function reservas_huerfanas( $sede_id ) {
+	public static function reservas_huerfanas( $sede_id, $antiguedad_minutos = 0 ) {
 		global $wpdb;
 
 		$sede_id = (int) $sede_id;
-		$filas   = (array) $wpdb->get_results(
+
+		// El filtro de antigüedad existe para la limpieza automática: una reserva
+		// recién hecha puede parecer huérfana durante unos segundos si su pedido
+		// todavía se está guardando. Para el aviso en pantalla no hace falta,
+		// porque ahí lo mira una persona.
+		$condicion = '';
+		$params    = array( $sede_id );
+		if ( $antiguedad_minutos > 0 ) {
+			$condicion = ' AND updated_at <= %s';
+			$params[]  = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - ( (int) $antiguedad_minutos * MINUTE_IN_SECONDS ) );
+		}
+
+		$filas = (array) $wpdb->get_results(
 			$wpdb->prepare(
 				'SELECT producto_id, stock_reservado FROM ' . self::tabla() . '
-				 WHERE sede_id = %d AND stock_reservado > 0',
-				$sede_id
+				 WHERE sede_id = %d AND stock_reservado > 0' . $condicion, // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$params
 			),
 			ARRAY_A
 		);
@@ -482,6 +498,66 @@ class MSP_Stock {
 		}
 
 		return $fuera;
+	}
+
+	/**
+	 * Suelta sola las reservas que se quedaron sin pedido.
+	 *
+	 * Es la red de seguridad de los hooks de borrado. Esos hooks cubren el caso
+	 * normal, pero dependen de acertar con el nombre del hook en cada
+	 * almacenamiento de pedidos (clásico y HPOS usan hooks distintos), y de que
+	 * WooCommerce no los cambie. Esto no depende de nada de eso: mira el estado
+	 * real y corrige lo que sobra.
+	 *
+	 * Solo toca reservas de **más de 30 minutos**, para no pelearse con un
+	 * checkout que se esté completando justo ahora.
+	 *
+	 * @return int Unidades liberadas.
+	 */
+	public static function limpiar_reservas_huerfanas() {
+		if ( ! class_exists( 'MSP_Sedes' ) ) {
+			return 0;
+		}
+
+		$liberadas = 0;
+
+		foreach ( MSP_Sedes::obtener_sedes_activas() as $sede ) {
+			foreach ( self::reservas_huerfanas( $sede->ID, 30 ) as $producto_id => $unidades ) {
+				self::liberar_reserva( $producto_id, (int) $sede->ID, $unidades );
+				self::sincronizar_woo( $producto_id );
+				$liberadas += $unidades;
+			}
+		}
+
+		if ( $liberadas ) {
+			// Queda constancia: stock que se libera solo es algo que alguien
+			// debería poder explicar después.
+			update_option(
+				'msp_ultima_limpieza_reservas',
+				array(
+					'fecha'     => current_time( 'mysql' ),
+					'liberadas' => $liberadas,
+				),
+				false
+			);
+		}
+
+		return $liberadas;
+	}
+
+	/**
+	 * Programa la limpieza automática de reservas huérfanas.
+	 */
+	public static function programar_limpieza() {
+		if ( function_exists( 'as_has_scheduled_action' ) && function_exists( 'as_schedule_recurring_action' ) ) {
+			if ( ! as_has_scheduled_action( 'msp_limpiar_reservas', array(), 'multisede-pos' ) ) {
+				as_schedule_recurring_action( time() + HOUR_IN_SECONDS, 6 * HOUR_IN_SECONDS, 'msp_limpiar_reservas', array(), 'multisede-pos' );
+			}
+			return;
+		}
+		if ( ! wp_next_scheduled( 'msp_limpiar_reservas' ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'twicedaily', 'msp_limpiar_reservas' );
+		}
 	}
 
 	/**

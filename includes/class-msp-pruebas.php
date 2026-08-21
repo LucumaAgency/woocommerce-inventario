@@ -877,26 +877,49 @@ class MSP_Pruebas {
 
 		$reservado_con_pedido = (int) MSP_Stock::por_sede( $producto_id )[ $sede_id ]['reservado'];
 
+		// Estado del pedido justo antes de borrarlo: si la guarda de
+		// `liberar_pedido()` corta por aquí, el hook puede estar disparándose
+		// perfectamente y el fallo ser otro. Sin este dato no se distingue.
+		$estado_reserva = (string) $order->get_meta( '_msp_reserva_estado' );
+		$almacen        = MSP_Caja::hpos_activo() ? 'HPOS' : 'clásico';
+
 		// Borrar de verdad, que es lo que dejaba la reserva huérfana.
-		$order_id = $order->get_id();
 		$order->delete( true );
 
 		$reservado_tras_borrar = (int) MSP_Stock::por_sede( $producto_id )[ $sede_id ]['reservado'];
 
 		if ( $reservado_con_pedido > $reservado_tras_borrar ) {
-			$lineas[] = '✅ E · ' . __( 'al borrar el pedido, la reserva se suelta: el stock no queda inmovilizado.', 'multisede-pos' );
+			$lineas[] = '✅ E · ' . __( 'al borrar el pedido, la reserva se suelta en el acto.', 'multisede-pos' );
 		} else {
-			$lineas[] = sprintf(
-				'❌ E · ' . __( 'la reserva sobrevivió al borrado (antes %1$d, después %2$d): ese stock quedaría bloqueado para siempre.', 'multisede-pos' ),
-				$reservado_con_pedido,
-				$reservado_tras_borrar
-			);
+			// Se comprueba que la red de seguridad la habría rescatado. Se llama
+			// sin el filtro de antigüedad a propósito: en producción espera 30
+			// minutos para no pelearse con un checkout en curso, y la reserva de
+			// esta prueba tiene segundos.
+			$rescatables = MSP_Stock::reservas_huerfanas( $sede_id );
+			foreach ( $rescatables as $pid => $unidades ) {
+				MSP_Stock::liberar_reserva( $pid, $sede_id, $unidades );
+				MSP_Stock::sincronizar_woo( $pid );
+			}
+			$tras_red = (int) MSP_Stock::por_sede( $producto_id )[ $sede_id ]['reservado'];
+
+			if ( $tras_red < $reservado_tras_borrar ) {
+				$lineas[] = sprintf(
+					'⚠️ E · ' . __( 'el hook de borrado no llegó (almacén %1$s, estado «%2$s»), pero la limpieza automática la rescató. El stock no queda bloqueado, aunque tarda hasta 6 h en soltarse solo.', 'multisede-pos' ),
+					$almacen,
+					$estado_reserva ? $estado_reserva : '—'
+				);
+			} else {
+				$lineas[] = sprintf(
+					'❌ E · ' . __( 'la reserva sobrevivió al borrado Y a la limpieza (antes %1$d, después %2$d · almacén %3$s · estado «%4$s»): ese stock quedaría bloqueado.', 'multisede-pos' ),
+					$reservado_con_pedido,
+					$reservado_tras_borrar,
+					$almacen,
+					$estado_reserva ? $estado_reserva : '—'
+				);
+				MSP_Stock::liberar_reserva( $producto_id, $sede_id, 1 );
+			}
 			$fallos++;
-			// Dejarlo limpio igualmente, para no ensuciar el inventario con la
-			// prueba misma.
-			MSP_Stock::liberar_reserva( $producto_id, $sede_id, 1 );
 		}
-		unset( $order_id );
 
 		// ── E bis · El detector de huérfanas encuentra una fabricada ─────────
 		MSP_Stock::reservar( $producto_id, $sede_id, 1 ); // Reserva sin pedido: huérfana por definición.

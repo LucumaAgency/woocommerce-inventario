@@ -105,6 +105,29 @@ class MSP_Inventario {
 			return;
 		}
 
+		$accion = sanitize_key( wp_unslash( $_POST['msp_inventario_action'] ) );
+
+		if ( 'liberar_huerfanas' === $accion ) {
+			$liberadas = 0;
+			foreach ( MSP_Stock::reservas_huerfanas( $sede_id ) as $producto_id => $unidades ) {
+				MSP_Stock::liberar_reserva( $producto_id, $sede_id, $unidades );
+				MSP_Stock::sincronizar_woo( $producto_id );
+				$liberadas += $unidades;
+			}
+
+			wp_safe_redirect(
+				add_query_arg(
+					array(
+						'page'      => self::PAGE,
+						'sede'      => $sede_id,
+						'liberadas' => (int) $liberadas,
+					),
+					admin_url( 'admin.php' )
+				)
+			);
+			exit;
+		}
+
 		$cambios = 0;
 
 		if ( isset( $_POST['msp_stock'] ) && is_array( $_POST['msp_stock'] ) ) {
@@ -173,6 +196,94 @@ class MSP_Inventario {
 
 		if ( ! $sede_id || ! $this->puede_ver_sede( $sede_id ) ) {
 			$sede_id = (int) $sedes[0]->ID;
+		}
+
+		$liberadas = isset( $_GET['liberadas'] ) ? absint( wp_unslash( $_GET['liberadas'] ) ) : -1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+		if ( $liberadas >= 0 ) {
+			printf(
+				'<div class="notice notice-success is-dismissible"><p>%s</p></div>',
+				esc_html(
+					$liberadas > 0
+						? sprintf(
+							/* translators: %d: unidades liberadas. */
+							_n(
+								'Se liberó %d unidad que estaba reservada por un pedido que ya no existe.',
+								'Se liberaron %d unidades que estaban reservadas por pedidos que ya no existen.',
+								$liberadas,
+								'multisede-pos'
+							),
+							$liberadas
+						)
+						: __( 'No había reservas huérfanas que liberar.', 'multisede-pos' )
+				)
+			);
+		}
+
+		// Reservas sin pedido detrás: inmovilizan stock para siempre si nadie las
+		// suelta. Se avisa aquí porque es la pantalla donde se mira el stock
+		// cuando algo no cuadra.
+		$huerfanas = MSP_Stock::reservas_huerfanas( $sede_id );
+		if ( $huerfanas && current_user_can( 'msp_gestionar_stock' ) ) {
+			$total = array_sum( $huerfanas );
+			echo '<div class="notice notice-warning"><p>';
+			printf(
+				esc_html(
+					/* translators: 1: unidades, 2: productos. */
+					_n(
+						'Hay %1$d unidad reservada por un pedido que ya no existe, en %2$d producto. Está inmovilizada: no se puede vender ni por la web ni en el mostrador.',
+						'Hay %1$d unidades reservadas por pedidos que ya no existen, en %2$d productos. Están inmovilizadas: no se pueden vender ni por la web ni en el mostrador.',
+						$total,
+						'multisede-pos'
+					)
+				),
+				(int) $total,
+				count( $huerfanas )
+			);
+			echo '</p><form method="post" style="margin-bottom:8px">';
+			wp_nonce_field( 'msp_inventario', 'msp_inventario_nonce' );
+			echo '<input type="hidden" name="msp_inventario_action" value="liberar_huerfanas" />';
+			echo '<input type="hidden" name="sede" value="' . esc_attr( $sede_id ) . '" />';
+			submit_button( __( 'Liberar esas reservas', 'multisede-pos' ), 'secondary', 'submit', false );
+			echo '</form></div>';
+		}
+
+		// Divergencia entre el stock de Woo y la suma por sede. Es el síntoma que
+		// dejaba un pedido sin sede, y el que hacía que la web bloqueara ventas
+		// con un mensaje del core que no explica nada.
+		$divergencias = MSP_Stock::divergencias_con_woo();
+		if ( $divergencias && current_user_can( 'msp_gestionar_stock' ) ) {
+			echo '<div class="notice notice-warning"><p><strong>';
+			printf(
+				esc_html(
+					/* translators: %d: número de productos. */
+					_n(
+						'%d producto tiene el stock de la tienda web descuadrado con el de las sedes.',
+						'%d productos tienen el stock de la tienda web descuadrado con el de las sedes.',
+						count( $divergencias ),
+						'multisede-pos'
+					)
+				),
+				count( $divergencias )
+			);
+			echo '</strong><br>';
+			esc_html_e( 'La web puede estar bloqueando ventas de productos que sí hay en tienda, o al revés. Se corrige guardando el stock de esa sede aquí abajo.', 'multisede-pos' );
+			echo '</p><ul style="margin-left:18px;list-style:disc">';
+			foreach ( array_slice( $divergencias, 0, 10 ) as $d ) {
+				printf(
+					'<li>%s — %s</li>',
+					esc_html( $d['nombre'] ),
+					esc_html(
+						sprintf(
+							/* translators: 1: stock en la web, 2: stock en las sedes. */
+							__( 'web: %1$d · sedes: %2$d', 'multisede-pos' ),
+							$d['woo'],
+							$d['sedes']
+						)
+					)
+				);
+			}
+			echo '</ul></div>';
 		}
 
 		if ( $guardado > 0 ) {

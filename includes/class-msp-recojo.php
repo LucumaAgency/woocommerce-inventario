@@ -63,6 +63,20 @@ class MSP_Recojo {
 		// Liberar reserva si se cancela o reembolsa antes del recojo.
 		add_action( 'woocommerce_order_status_cancelled', array( $this, 'liberar_pedido' ) );
 		add_action( 'woocommerce_order_status_refunded', array( $this, 'liberar_pedido' ) );
+
+		// …y también si el pedido se BORRA. Sin esto la reserva queda viva sin
+		// dueño: el stock se inmoviliza para siempre, subir existencias no ayuda
+		// (disponible = stock − reservado) y desde la interfaz no había salida.
+		add_action( 'wp_trash_post', array( $this, 'liberar_pedido' ) );
+		add_action( 'before_delete_post', array( $this, 'liberar_pedido' ) );
+		// HPOS: con la tabla de pedidos propia, los hooks de post no se disparan.
+		add_action( 'woocommerce_before_trash_order', array( $this, 'liberar_pedido' ) );
+		add_action( 'woocommerce_before_delete_order', array( $this, 'liberar_pedido' ) );
+
+		// El otro camino por el que se perdía una reserva: marcar el pedido como
+		// completado a mano, sin usar la acción "Marcar como recogido". La
+		// mercadería sale de la tienda igual, así que el stock debe descontarse.
+		add_action( 'woocommerce_order_status_completed', array( $this, 'al_completar' ) );
 	}
 
 	/**
@@ -376,6 +390,34 @@ class MSP_Recojo {
 	}
 
 	/**
+	 * Un pedido con reserva que pasa a completado se da por entregado.
+	 *
+	 * La forma correcta de entregar es la pantalla de Entregas o la acción del
+	 * pedido, que llaman a `procesar_recogido()`. Pero alguien puede marcar el
+	 * pedido como completado a mano desde WooCommerce, y entonces la mercadería
+	 * sale de la tienda con la reserva todavía puesta: el stock queda
+	 * inmovilizado y el físico nunca baja.
+	 *
+	 * Se trata igual que un recojo, que es lo que de hecho ocurrió.
+	 *
+	 * @param int $order_id ID del pedido.
+	 */
+	public function al_completar( $order_id ) {
+		$order = wc_get_order( $order_id );
+		if ( ! $order instanceof WC_Order ) {
+			return;
+		}
+
+		// Solo pedidos web con reserva viva. Los del POS ya descontaron al
+		// cobrar, y `procesar_recogido()` es idempotente por su propia guarda.
+		if ( 'reservado' !== $order->get_meta( '_msp_reserva_estado' ) ) {
+			return;
+		}
+
+		$this->procesar_recogido( $order );
+	}
+
+	/**
 	 * Añade la acción "Marcar como recogido" al pedido.
 	 *
 	 * @param array $acciones Acciones existentes.
@@ -451,8 +493,15 @@ class MSP_Recojo {
 	 * @param int $order_id ID del pedido.
 	 */
 	public function liberar_pedido( $order_id ) {
+		if ( ! function_exists( 'wc_get_order' ) ) {
+			return;
+		}
+
 		$order = wc_get_order( $order_id );
-		if ( ! $order ) {
+
+		// Los hooks de borrado de WordPress se disparan para CUALQUIER tipo de
+		// contenido, no solo pedidos: una entrada o un producto pasan por aquí.
+		if ( ! $order instanceof WC_Order ) {
 			return;
 		}
 

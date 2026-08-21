@@ -360,6 +360,131 @@ class MSP_Stock {
 	}
 
 	/**
+	 * Reservas de una sede que ya no tienen pedido vivo detrás.
+	 *
+	 * Una reserva se queda huérfana cuando su pedido desaparece sin pasar por el
+	 * camino previsto: se borra, se vacía la papelera, o se toca la base de datos
+	 * por fuera. El efecto es que el stock queda inmovilizado **para siempre**,
+	 * porque `disponible = stock − reservado` y ese reservado ya no baja nunca.
+	 * Subir existencias no ayuda.
+	 *
+	 * Se compara lo reservado en la tabla contra la suma de lo que reclaman los
+	 * pedidos vivos de esa sede. La diferencia es lo que sobra.
+	 *
+	 * @param int $sede_id Sede.
+	 * @return array Mapa producto_id => unidades huérfanas (solo los que sobran).
+	 */
+	public static function reservas_huerfanas( $sede_id ) {
+		global $wpdb;
+
+		$sede_id = (int) $sede_id;
+		$filas   = (array) $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT producto_id, stock_reservado FROM ' . self::tabla() . '
+				 WHERE sede_id = %d AND stock_reservado > 0',
+				$sede_id
+			),
+			ARRAY_A
+		);
+
+		if ( ! $filas || ! function_exists( 'wc_get_orders' ) ) {
+			return array();
+		}
+
+		// Lo que reclaman los pedidos que todavía están vivos y sin recoger.
+		$legitimo = array();
+		$pedidos  = wc_get_orders(
+			array(
+				'limit'  => 500,
+				'status' => array( 'pending', 'processing', 'on-hold' ),
+			)
+		);
+
+		foreach ( $pedidos as $order ) {
+			if ( (int) $order->get_meta( '_msp_sede_id' ) !== $sede_id ) {
+				continue;
+			}
+			if ( 'reservado' !== $order->get_meta( '_msp_reserva_estado' ) ) {
+				continue;
+			}
+			foreach ( $order->get_items() as $item ) {
+				if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) {
+					continue;
+				}
+				$product = $item->get_product();
+				if ( ! $product ) {
+					continue;
+				}
+				$pid              = $product->get_id();
+				$legitimo[ $pid ] = ( isset( $legitimo[ $pid ] ) ? $legitimo[ $pid ] : 0 ) + (int) $item->get_quantity();
+			}
+		}
+
+		$huerfanas = array();
+		foreach ( $filas as $fila ) {
+			$pid    = (int) $fila['producto_id'];
+			$sobra  = (int) $fila['stock_reservado'] - ( isset( $legitimo[ $pid ] ) ? $legitimo[ $pid ] : 0 );
+			if ( $sobra > 0 ) {
+				$huerfanas[ $pid ] = $sobra;
+			}
+		}
+
+		return $huerfanas;
+	}
+
+	/**
+	 * Productos cuyo stock de WooCommerce no cuadra con la suma por sede.
+	 *
+	 * El stock que ve la tienda web es un **espejo**: `sincronizar_woo()` lo
+	 * reescribe con el disponible de la sede activa cada vez que el plugin toca
+	 * algo. Pero si alguien cambia el stock desde la ficha del producto, o un
+	 * pedido sin sede lo descuenta por su cuenta, el espejo deja de coincidir y
+	 * **nada lo detecta**: el plugin dice que hay una unidad y Woo bloquea la
+	 * compra diciendo que no hay ninguna, con un mensaje que no es del plugin y
+	 * no explica nada.
+	 *
+	 * Esto lo detecta para poder avisar. Se compara contra el **total** de todas
+	 * las sedes, que es lo que Woo debería reflejar cuando el cliente no ha
+	 * elegido tienda.
+	 *
+	 * @param int $limite Máximo de productos a revisar.
+	 * @return array Lista de {producto_id, nombre, woo, sedes}.
+	 */
+	public static function divergencias_con_woo( $limite = 200 ) {
+		global $wpdb;
+
+		$ids = (array) $wpdb->get_col(
+			$wpdb->prepare(
+				'SELECT DISTINCT producto_id FROM ' . self::tabla() . ' LIMIT %d',
+				(int) $limite
+			)
+		);
+
+		$fuera = array();
+
+		foreach ( $ids as $producto_id ) {
+			$product = wc_get_product( (int) $producto_id );
+			if ( ! $product || ! $product->get_manage_stock() ) {
+				continue;
+			}
+
+			$en_woo   = (int) $product->get_stock_quantity();
+			$en_sedes = (int) self::total( (int) $producto_id ) - (int) self::total_reservado( (int) $producto_id );
+
+			if ( $en_woo !== $en_sedes ) {
+				$fuera[] = array(
+					'producto_id' => (int) $producto_id,
+					'nombre'      => $product->get_name(),
+					'woo'         => $en_woo,
+					'sedes'       => $en_sedes,
+				);
+			}
+		}
+
+		return $fuera;
+	}
+
+	/**
 	 * Libera una reserva sin descontar stock (cancelación antes del recojo).
 	 *
 	 * @param int $producto_id ID de producto.
@@ -443,18 +568,64 @@ class MSP_Stock {
 	}
 
 	/**
-	 * Evita la reducción automática de stock de Woo en pedidos con sede:
-	 * esos los gestiona el plugin (reserva en recojo, descuento en POS).
+	 * Evita la reducción automática de stock de Woo cuando manda el plugin.
+	 *
+	 * Un pedido **con sede** lo gestiona el plugin: reserva al pagar y descuento
+	 * al recoger. Woo no debe tocarlo.
+	 *
+	 * Un pedido **sin sede** es un caso que no debería existir mientras el sitio
+	 * venda solo con recojo en tienda, y **es el que descuadraba los dos
+	 * inventarios en silencio**: el plugin no lo reservaba —no sabe a qué sede—
+	 * pero Woo sí le descontaba el stock global. La tabla por sede decía una cosa
+	 * y WooCommerce otra, sin que nada lo detectara, y la divergencia sobrevivía
+	 * hasta que alguien tocara el inventario a mano.
+	 *
+	 * Ahora Woo tampoco descuenta ahí, y en su lugar **queda constancia en el
+	 * pedido**: un aviso visible es mejor que un descuadre callado. Si el pedido
+	 * es legítimo (venta sin sede, futuro delivery), el stock se ajusta a mano;
+	 * si es un error de configuración —como el checkout de bloques que no pintaba
+	 * el campo de sede—, la nota dice exactamente qué mirar.
 	 *
 	 * @param bool     $reduce Si Woo debe reducir.
 	 * @param WC_Order $order  Pedido.
 	 * @return bool
 	 */
 	public function evitar_reduccion_woo( $reduce, $order ) {
-		if ( $order && $order->get_meta( '_msp_sede_id' ) ) {
+		if ( ! $order instanceof WC_Order ) {
+			return $reduce;
+		}
+
+		if ( $order->get_meta( '_msp_sede_id' ) ) {
 			return false;
 		}
-		return $reduce;
+
+		// Pedidos ajenos al plugin (suscripciones, pedidos manuales de otro
+		// flujo) no deberían verse afectados: solo se interviene si el sitio
+		// tiene sedes configuradas, que es cuando el modelo por sede aplica.
+		if ( ! MSP_Sedes::obtener_sedes_activas() ) {
+			return $reduce;
+		}
+
+		self::avisar_pedido_sin_sede( $order );
+
+		return false;
+	}
+
+	/**
+	 * Anota en el pedido que llegó sin sede, una sola vez.
+	 *
+	 * @param WC_Order $order Pedido.
+	 */
+	private static function avisar_pedido_sin_sede( $order ) {
+		if ( $order->get_meta( '_msp_aviso_sin_sede' ) ) {
+			return;
+		}
+
+		$order->add_order_note(
+			__( 'ATENCIÓN: este pedido llegó sin tienda asignada, así que su stock no se descontó de ninguna sede. Ajusta el inventario a mano si la mercadería salió. Si se repite, revisa que la página de pago use el checkout clásico: el de bloques no pinta el campo de tienda.', 'multisede-pos' )
+		);
+		$order->update_meta_data( '_msp_aviso_sin_sede', '1' );
+		$order->save();
 	}
 
 	/* ---------------------------------------------------------------------

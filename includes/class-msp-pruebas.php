@@ -921,6 +921,37 @@ class MSP_Pruebas {
 			$fallos++;
 		}
 
+		// ── E ter · El camino REAL: enviar el pedido a la papelera ──────────
+		// El borrado forzado de arriba es el caso más duro y menos frecuente. Lo
+		// que hace la gente es mandar el pedido a la papelera, y ahí los datos
+		// siguen existiendo, así que el hook sí puede leerlos.
+		$papelera = wc_create_order();
+		$papelera->add_product( wc_get_product( $producto_id ), 1 );
+		$papelera->update_meta_data( '_msp_sede_id', $sede_id );
+		$papelera->update_meta_data( '_msp_origen', 'web' );
+		$papelera->update_meta_data( '_msp_recogido', '0' );
+		$papelera->update_meta_data( self::META, '1' );
+		$papelera->calculate_totals();
+		$papelera->save();
+
+		$recojo->reservar_pedido_obj( $papelera );
+		$antes_papelera = (int) MSP_Stock::por_sede( $producto_id )[ $sede_id ]['reservado'];
+
+		$papelera->delete( false ); // false = a la papelera, sin destruir datos.
+
+		$tras_papelera = (int) MSP_Stock::por_sede( $producto_id )[ $sede_id ]['reservado'];
+
+		if ( $antes_papelera > $tras_papelera ) {
+			$lineas[] = '✅ E ter · ' . __( 'al mandar el pedido a la papelera —que es lo que se hace normalmente— la reserva se suelta en el acto.', 'multisede-pos' );
+		} else {
+			$lineas[] = '❌ E ter · ' . __( 'ni siquiera la papelera suelta la reserva: entonces el stock depende siempre de la limpieza automática.', 'multisede-pos' );
+			$fallos++;
+			MSP_Stock::liberar_reserva( $producto_id, $sede_id, 1 );
+			MSP_Stock::sincronizar_woo( $producto_id );
+		}
+
+		$papelera->delete( true );
+
 		// ── E bis · El detector de huérfanas encuentra una fabricada ─────────
 		MSP_Stock::reservar( $producto_id, $sede_id, 1 ); // Reserva sin pedido: huérfana por definición.
 		$detectadas = MSP_Stock::reservas_huerfanas( $sede_id );

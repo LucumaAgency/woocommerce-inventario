@@ -551,12 +551,16 @@ class MSP_Stock {
 	public static function programar_limpieza() {
 		if ( function_exists( 'as_has_scheduled_action' ) && function_exists( 'as_schedule_recurring_action' ) ) {
 			if ( ! as_has_scheduled_action( 'msp_limpiar_reservas', array(), 'multisede-pos' ) ) {
-				as_schedule_recurring_action( time() + HOUR_IN_SECONDS, 6 * HOUR_IN_SECONDS, 'msp_limpiar_reservas', array(), 'multisede-pos' );
+				// Cada hora, no cada seis: en HPOS un borrado forzado destruye los
+				// datos del pedido antes de que ningún hook pueda leerlos, así que
+				// para ese caso esta limpieza es la ÚNICA vía. Una hora de stock
+				// bloqueado es asumible; seis, en temporada, no.
+				as_schedule_recurring_action( time() + HOUR_IN_SECONDS, HOUR_IN_SECONDS, 'msp_limpiar_reservas', array(), 'multisede-pos' );
 			}
 			return;
 		}
 		if ( ! wp_next_scheduled( 'msp_limpiar_reservas' ) ) {
-			wp_schedule_event( time() + HOUR_IN_SECONDS, 'twicedaily', 'msp_limpiar_reservas' );
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', 'msp_limpiar_reservas' );
 		}
 	}
 

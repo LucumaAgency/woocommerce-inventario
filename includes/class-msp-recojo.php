@@ -73,6 +73,14 @@ class MSP_Recojo {
 		add_action( 'woocommerce_before_trash_order', array( $this, 'liberar_pedido' ) );
 		add_action( 'woocommerce_before_delete_order', array( $this, 'liberar_pedido' ) );
 
+		// Y los de después del borrado, que **reciben el pedido ya cargado**.
+		// Importa: comprobado en el sitio (2026-08-20, HPOS), un borrado forzado
+		// no dispara los `before_*`, y para entonces `wc_get_order()` ya no
+		// encuentra nada. Con el objeto en la mano da igual que el pedido ya no
+		// exista en la base de datos: sus datos siguen en memoria.
+		add_action( 'woocommerce_delete_order', array( $this, 'liberar_pedido' ), 10, 2 );
+		add_action( 'woocommerce_trash_order', array( $this, 'liberar_pedido' ), 10, 2 );
+
 		// El otro camino por el que se perdía una reserva: marcar el pedido como
 		// completado a mano, sin usar la acción "Marcar como recogido". La
 		// mercadería sale de la tienda igual, así que el stock debe descontarse.
@@ -492,12 +500,17 @@ class MSP_Recojo {
 	 *
 	 * @param int $order_id ID del pedido.
 	 */
-	public function liberar_pedido( $order_id ) {
+	public function liberar_pedido( $order_id, $order = null ) {
 		if ( ! function_exists( 'wc_get_order' ) ) {
 			return;
 		}
 
-		$order = wc_get_order( $order_id );
+		// Si el hook trae el pedido, se usa ese: en los hooks posteriores al
+		// borrado ya no se puede recuperar de la base de datos, pero el objeto
+		// conserva sus datos.
+		if ( ! $order instanceof WC_Order ) {
+			$order = wc_get_order( $order_id );
+		}
 
 		// Los hooks de borrado de WordPress se disparan para CUALQUIER tipo de
 		// contenido, no solo pedidos: una entrada o un producto pasan por aquí.
@@ -509,6 +522,20 @@ class MSP_Recojo {
 		if ( ! $sede_id || 'reservado' !== $order->get_meta( '_msp_reserva_estado' ) ) {
 			return;
 		}
+
+		// Un mismo borrado puede pasar por varios de estos hooks. Sin esta guarda
+		// se liberaría la reserva dos veces y el stock disponible saldría
+		// inflado, que es peor que el problema original.
+		//
+		// La clave es el `$order_id` del hook y NO `$order->get_id()`: tras el
+		// borrado WooCommerce pone el id del objeto a 0, así que ahí ya no
+		// identifica nada.
+		static $ya_liberados = array();
+		$clave                = (int) $order_id;
+		if ( ! $clave || isset( $ya_liberados[ $clave ] ) ) {
+			return;
+		}
+		$ya_liberados[ $clave ] = true;
 
 		foreach ( $order->get_items() as $item ) {
 			if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) {
@@ -525,8 +552,13 @@ class MSP_Recojo {
 			MSP_Stock::sincronizar_woo( $producto_id );
 		}
 
-		$order->update_meta_data( '_msp_reserva_estado', 'liberado' );
-		$order->save();
+		// Solo se anota en el pedido si el pedido sigue existiendo. Tras un
+		// borrado su id es 0, y guardar ahí no actualizaría nada: crearía un
+		// pedido nuevo de la nada.
+		if ( $order->get_id() ) {
+			$order->update_meta_data( '_msp_reserva_estado', 'liberado' );
+			$order->save();
+		}
 	}
 
 	/**

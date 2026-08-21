@@ -810,11 +810,22 @@ class MSP_Wizard {
 		?>
 		<h2><?php esc_html_e( 'Recojo en tienda', 'multisede-pos' ); ?></h2>
 		<p><?php esc_html_e( 'El recojo en tienda usa el método "Recogida local" de WooCommerce. Por ahora no se ofrece delivery por la web.', 'multisede-pos' ); ?></p>
+
+		<div class="notice notice-warning inline" style="margin:12px 0;padding:10px 12px">
+			<p style="margin:0"><strong><?php esc_html_e( 'Un solo método de recogida, con nombre genérico. No crees uno por tienda.', 'multisede-pos' ); ?></strong></p>
+			<p style="margin:6px 0 0">
+				<?php esc_html_e( 'Quien decide la tienda es el selector del plugin, y es la que reserva el stock y queda en el pedido. El método de envío de WooCommerce existe solo para que se pueda cerrar la compra sin dirección de entrega: no decide nada.', 'multisede-pos' ); ?>
+			</p>
+			<p style="margin:6px 0 0">
+				<?php esc_html_e( 'Si creas un método por tienda, el cliente puede leer en el carrito "recogida en Miraflores" mientras su pedido queda reservado en Barranco, y va a ir a la tienda equivocada.', 'multisede-pos' ); ?>
+			</p>
+		</div>
+
 		<ol>
 			<li><?php
 				printf(
 					/* translators: %s: enlace a ajustes de envío. */
-					esc_html__( 'Ve a %s y activa "Recogida local" (Local Pickup).', 'multisede-pos' ),
+					esc_html__( 'Ve a %s y activa "Recogida local" (Local Pickup), con UN solo método y un nombre neutro como "Recojo en tienda", sin el nombre de ninguna sede.', 'multisede-pos' ),
 					'<a href="' . $lp_url . '" target="_blank">' . esc_html__( 'WooCommerce → Ajustes → Envío', 'multisede-pos' ) . '</a>'
 				);
 			?></li>

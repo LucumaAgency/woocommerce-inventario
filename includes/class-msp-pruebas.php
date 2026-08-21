@@ -103,6 +103,9 @@ class MSP_Pruebas {
 			case 'comprobar_permisos':
 				$aviso = $this->comprobar_permisos();
 				break;
+			case 'comprobar_inventario':
+				$aviso = $this->comprobar_inventario( $sede_id );
+				break;
 			case 'comprobar_reglas':
 				$aviso = $this->comprobar_reglas();
 				break;
@@ -831,6 +834,134 @@ class MSP_Pruebas {
 	}
 
 	/**
+	 * Comprueba los hallazgos de inventario y configuración (D, E, G y B).
+	 *
+	 * Los cuatro se pueden automatizar porque ninguno es visual: son estado en
+	 * la base de datos y ajustes de WooCommerce.
+	 *
+	 * **D y E se prueban de verdad**, fabricando el escenario y deshaciéndolo:
+	 * es la única forma de saber que la reserva se suelta, y no basta con leer
+	 * el código. Todo lo que se toca se deja como estaba.
+	 *
+	 * @param int $sede_id Sede.
+	 * @return string Resultado.
+	 */
+	private function comprobar_inventario( $sede_id ) {
+		$lineas = array();
+		$fallos = 0;
+
+		if ( ! $sede_id ) {
+			return __( 'Elige una tienda.', 'multisede-pos' );
+		}
+
+		$producto_id = $this->producto_con_stock( $sede_id );
+		if ( ! $producto_id ) {
+			return __( 'Esa tienda no tiene ningún producto con stock para probar.', 'multisede-pos' );
+		}
+
+		$antes = MSP_Stock::get( $producto_id, $sede_id );
+		$stock_inicial = $antes ? (int) $antes->stock : 0;
+
+		// ── E · Borrar el pedido suelta la reserva ───────────────────────────
+		$order = wc_create_order();
+		$order->add_product( wc_get_product( $producto_id ), 1 );
+		$order->update_meta_data( '_msp_sede_id', $sede_id );
+		$order->update_meta_data( '_msp_origen', 'web' );
+		$order->update_meta_data( '_msp_recogido', '0' );
+		$order->update_meta_data( self::META, '1' );
+		$order->calculate_totals();
+		$order->save();
+
+		$recojo = new MSP_Recojo();
+		$recojo->reservar_pedido_obj( $order );
+
+		$reservado_con_pedido = (int) MSP_Stock::por_sede( $producto_id )[ $sede_id ]['reservado'];
+
+		// Borrar de verdad, que es lo que dejaba la reserva huérfana.
+		$order_id = $order->get_id();
+		$order->delete( true );
+
+		$reservado_tras_borrar = (int) MSP_Stock::por_sede( $producto_id )[ $sede_id ]['reservado'];
+
+		if ( $reservado_con_pedido > $reservado_tras_borrar ) {
+			$lineas[] = '✅ E · ' . __( 'al borrar el pedido, la reserva se suelta: el stock no queda inmovilizado.', 'multisede-pos' );
+		} else {
+			$lineas[] = sprintf(
+				'❌ E · ' . __( 'la reserva sobrevivió al borrado (antes %1$d, después %2$d): ese stock quedaría bloqueado para siempre.', 'multisede-pos' ),
+				$reservado_con_pedido,
+				$reservado_tras_borrar
+			);
+			$fallos++;
+			// Dejarlo limpio igualmente, para no ensuciar el inventario con la
+			// prueba misma.
+			MSP_Stock::liberar_reserva( $producto_id, $sede_id, 1 );
+		}
+		unset( $order_id );
+
+		// ── E bis · El detector de huérfanas encuentra una fabricada ─────────
+		MSP_Stock::reservar( $producto_id, $sede_id, 1 ); // Reserva sin pedido: huérfana por definición.
+		$detectadas = MSP_Stock::reservas_huerfanas( $sede_id );
+
+		if ( isset( $detectadas[ $producto_id ] ) && $detectadas[ $producto_id ] >= 1 ) {
+			$lineas[] = '✅ E bis · ' . __( 'el Inventario detecta una reserva sin pedido detrás.', 'multisede-pos' );
+		} else {
+			$lineas[] = '❌ E bis · ' . __( 'una reserva sin pedido NO se detecta: seguiría bloqueando stock sin que nadie lo vea.', 'multisede-pos' );
+			$fallos++;
+		}
+		MSP_Stock::liberar_reserva( $producto_id, $sede_id, 1 );
+
+		// ── D · Un pedido sin sede no descuenta por libre ────────────────────
+		$sin_sede = wc_create_order();
+		$sin_sede->add_product( wc_get_product( $producto_id ), 1 );
+		$sin_sede->update_meta_data( self::META, '1' );
+		$sin_sede->calculate_totals();
+		$sin_sede->save();
+
+		$stock_woo = new MSP_Stock();
+		$reduce    = $stock_woo->evitar_reduccion_woo( true, $sin_sede );
+
+		if ( ! $reduce ) {
+			$lineas[] = '✅ D · ' . __( 'un pedido sin tienda no descuenta stock por su cuenta, y queda anotado en el pedido.', 'multisede-pos' );
+		} else {
+			$lineas[] = '❌ D · ' . __( 'un pedido sin tienda seguiría descontando stock global: la web y el panel dirían cosas distintas.', 'multisede-pos' );
+			$fallos++;
+		}
+		$sin_sede->delete( true );
+
+		// Restaurar el stock exactamente como estaba.
+		MSP_Stock::set( $producto_id, $sede_id, $stock_inicial );
+		MSP_Stock::sincronizar_woo( $producto_id );
+
+		// ── G y B · Configuración de WooCommerce ─────────────────────────────
+		$problemas = MSP_Diagnostico::problemas();
+		$claves    = wp_list_pluck( $problemas, 'clave' );
+
+		if ( in_array( 'hold_stock', $claves, true ) ) {
+			$lineas[] = '⚠️ G · ' . __( '«Retener existencias (minutos)» está puesto: duplica la reserva del plugin y bloquea ventas de stock libre. Déjalo vacío.', 'multisede-pos' );
+			$fallos++;
+		} else {
+			$lineas[] = '✅ G · ' . __( 'la retención de stock de WooCommerce está desactivada, como debe.', 'multisede-pos' );
+		}
+
+		if ( in_array( 'local_pickup', $claves, true ) ) {
+			$lineas[] = '⚠️ B · ' . __( 'hay varios métodos de recogida: el cliente puede leer una tienda y que su pedido se reserve en otra. Deja uno solo, con nombre genérico.', 'multisede-pos' );
+			$fallos++;
+		} else {
+			$lineas[] = '✅ B · ' . __( 'un solo método de recogida (o ninguno): no hay forma de que el cliente lea una tienda distinta de la que reserva.', 'multisede-pos' );
+		}
+
+		$cabecera = 0 === $fallos
+			? __( 'Inventario y configuración: todo correcto.', 'multisede-pos' )
+			: sprintf(
+				/* translators: %d: número de avisos. */
+				_n( 'Inventario y configuración: %d aviso.', 'Inventario y configuración: %d avisos.', $fallos, 'multisede-pos' ),
+				$fallos
+			);
+
+		return $cabecera . ' — ' . implode( ' | ', $lineas );
+	}
+
+	/**
 	 * Deja un producto con exactamente una unidad disponible en la sede.
 	 *
 	 * @param int $sede_id Sede.
@@ -942,6 +1073,30 @@ class MSP_Pruebas {
 				<?php wp_nonce_field( 'msp_pruebas', 'msp_pruebas_nonce' ); ?>
 				<input type="hidden" name="msp_prueba_action" value="comprobar_reglas" />
 				<?php submit_button( __( 'Comprobar reglas', 'multisede-pos' ), 'secondary', 'submit', false ); ?>
+			</form>
+
+			<hr>
+
+			<h2><?php esc_html_e( 'Comprobar inventario y configuración', 'multisede-pos' ); ?></h2>
+			<p style="max-width:70ch">
+				<?php esc_html_e( 'Los cuatro hallazgos de inventario: que borrar un pedido suelte su reserva, que una reserva sin pedido se detecte, que un pedido sin tienda no descuente por su cuenta, y que la configuración de WooCommerce no esté peleándose con el plugin.', 'multisede-pos' ); ?>
+			</p>
+			<p style="max-width:70ch">
+				<em><?php esc_html_e( 'Fabrica y borra pedidos de prueba, y deja el stock exactamente como estaba.', 'multisede-pos' ); ?></em>
+			</p>
+			<form method="post">
+				<?php wp_nonce_field( 'msp_pruebas', 'msp_pruebas_nonce' ); ?>
+				<input type="hidden" name="msp_prueba_action" value="comprobar_inventario" />
+				<p>
+					<label><?php esc_html_e( 'Tienda:', 'multisede-pos' ); ?>
+						<select name="sede">
+							<?php foreach ( $sedes as $sede ) : ?>
+								<option value="<?php echo esc_attr( $sede->ID ); ?>"><?php echo esc_html( $sede->post_title ); ?></option>
+							<?php endforeach; ?>
+						</select>
+					</label>
+				</p>
+				<?php submit_button( __( 'Comprobar inventario', 'multisede-pos' ), 'secondary', 'submit', false ); ?>
 			</form>
 
 			<hr>

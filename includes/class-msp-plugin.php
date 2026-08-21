@@ -88,6 +88,10 @@ class MSP_Plugin {
 			$pruebas = new MSP_Pruebas();
 			$pruebas->init();
 
+			// Avisos de configuración incorrecta (hallazgos G y B).
+			$diagnostico = new MSP_Diagnostico();
+			$diagnostico->init();
+
 			$inventario = new MSP_Inventario();
 			$inventario->init();
 

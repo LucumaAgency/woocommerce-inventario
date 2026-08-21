@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.19.0
+- **Versión actual:** 1.20.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -278,6 +278,14 @@ Añade los campos de stock por sede en la pestaña **Inventario** del producto (
 - Registra automáticamente las ventas POS en efectivo (vía `msp_pos_venta_creada`).
 - Cierre con **arqueo**: esperado (`apertura + ingresos + ventas − egresos`) vs contado → diferencia.
 - Reporte de cierres recientes por sede.
+
+### MSP_Diagnostico (v1.20.0)
+Avisa de dos ajustes de WooCommerce que, mal puestos, rompen el plugin **de formas que no parecen un fallo del plugin**:
+
+- **`woocommerce_hold_stock_minutes` con valor** (hallazgo G) — Woo retiene stock por su cuenta mientras el pedido está pendiente de pago, y el plugin ya lo apartó: la misma unidad se cuenta dos veces y la web bloquea ventas de stock libre.
+- **Más de un método de recogida local activo** (hallazgo B) — el cliente lee en el carrito el método de Woo, pero quien reserva es la sede del plugin. Si no coinciden, va a la tienda equivocada.
+
+Los dos se arreglan con un ajuste, no con código, y por eso mismo dependían de que alguien se acordara. Los avisos salen **solo en las pantallas del plugin**: uno que aparece en todo el panel se vuelve ruido y se deja de leer.
 
 ### MSP_Pruebas (v1.16.0)
 `Caja → Pruebas`, **solo fuera de producción** y con `manage_options`. Existe porque probar el módulo a mano se iba en dos cosas ajenas al sistema: ir a *Acciones programadas* a empujar la cola, y montar la situación previa de cada caso.

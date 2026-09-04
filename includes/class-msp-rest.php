@@ -107,6 +107,33 @@ class MSP_REST {
 				'permission_callback' => array( $this, 'permiso' ),
 			)
 		);
+
+		register_rest_route(
+			self::NS,
+			'/probar-credenciales',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( $this, 'probar_credenciales' ),
+				'permission_callback' => array( $this, 'permiso' ),
+			)
+		);
+	}
+
+	/**
+	 * GET /probar-credenciales
+	 *
+	 * Comprueba el usuario/clave SOL contra SUNAT (el entorno configurado) sin
+	 * emitir ningún comprobante ni consumir numeración. Delega en
+	 * MSP_Emisor::probar_credenciales.
+	 *
+	 * @return WP_REST_Response
+	 */
+	public function probar_credenciales() {
+		$ajustes = MSP_Emisor::ajustes();
+		$res     = MSP_Emisor::probar_credenciales();
+		$res['entorno']     = isset( $ajustes['entorno'] ) ? $ajustes['entorno'] : '';
+		$res['sol_usuario'] = isset( $ajustes['sol_usuario'] ) ? $ajustes['sol_usuario'] : '';
+		return rest_ensure_response( $res );
 	}
 
 	/**

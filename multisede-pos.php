@@ -3,7 +3,7 @@
  * Plugin Name:       Multisede POS
  * Plugin URI:        https://github.com/LucumaAgency/woocommerce-inventario
  * Description:        Inventario por sede, recojo en tienda, POS de mostrador y caja chica para WooCommerce.
- * Version:           1.21.2
+ * Version:           1.21.3
  * Author:            Lucuma Agency
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html

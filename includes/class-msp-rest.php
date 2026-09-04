@@ -29,30 +29,6 @@ class MSP_REST {
 	 */
 	public function init() {
 		add_action( 'rest_api_init', array( $this, 'registrar_rutas' ) );
-		add_action( 'init', array( $this, 'manejar_login_once' ) );
-	}
-
-	/**
-	 * Canjea un token de auto-login de un solo uso por una sesión.
-	 *
-	 * Sirve para abrir una sesión de navegador (p. ej. capturas headless) sin
-	 * compartir la contraseña. El token solo lo pudo emitir un administrador
-	 * autenticado (ver `emitir_login_once`), dura 60 s y se invalida al usarse.
-	 */
-	public function manejar_login_once() {
-		if ( empty( $_GET['msp_login_once'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			return;
-		}
-		$token = sanitize_text_field( wp_unslash( $_GET['msp_login_once'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$key   = 'msp_login_once_' . md5( $token );
-		$uid   = get_transient( $key );
-		if ( ! $uid ) {
-			wp_die( esc_html__( 'Enlace de acceso inválido o expirado.', 'multisede-pos' ), '', array( 'response' => 403 ) );
-		}
-		delete_transient( $key );
-		wp_set_auth_cookie( (int) $uid, false );
-		wp_safe_redirect( admin_url() );
-		exit;
 	}
 
 	/**
@@ -142,37 +118,6 @@ class MSP_REST {
 			)
 		);
 
-		register_rest_route(
-			self::NS,
-			'/login-once',
-			array(
-				'methods'             => 'GET',
-				'callback'            => array( $this, 'emitir_login_once' ),
-				'permission_callback' => array( $this, 'permiso' ),
-			)
-		);
-	}
-
-	/**
-	 * GET /login-once
-	 *
-	 * Devuelve una URL de acceso de un solo uso (60 s) para el usuario actual.
-	 * Solo la puede pedir un administrador autenticado. Pensada para abrir una
-	 * sesión de navegador sin compartir la contraseña; el token se canjea en
-	 * `manejar_login_once` y se invalida al usarse.
-	 *
-	 * @return WP_REST_Response
-	 */
-	public function emitir_login_once() {
-		$token = wp_generate_password( 40, false );
-		set_transient( 'msp_login_once_' . md5( $token ), get_current_user_id(), 60 );
-		return rest_ensure_response(
-			array(
-				'url'         => home_url( '/?msp_login_once=' . rawurlencode( $token ) ),
-				'expira_seg'  => 60,
-				'un_solo_uso' => true,
-			)
-		);
 	}
 
 	/**

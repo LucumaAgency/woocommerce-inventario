@@ -97,6 +97,113 @@ class MSP_REST {
 				'permission_callback' => array( $this, 'permiso' ),
 			)
 		);
+
+		register_rest_route(
+			self::NS,
+			'/diagnostico',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( $this, 'diagnostico' ),
+				'permission_callback' => array( $this, 'permiso' ),
+			)
+		);
+	}
+
+	/**
+	 * GET /diagnostico
+	 *
+	 * Comprueba, sin llamar a SUNAT ni exponer material de la clave, que el
+	 * certificado está bien instalado: la ruta resuelve, el archivo se lee, el
+	 * certificado corresponde al RUC del emisor, cuándo vence, y que la clave
+	 * privada casa con el certificado. Refleja la misma resolución de ruta que
+	 * usa el motor de emisión (MSP_Emisor::ruta_certificado).
+	 *
+	 * @return WP_REST_Response
+	 */
+	public function diagnostico() {
+		$ajustes = MSP_Emisor::ajustes();
+		$ruc     = isset( $ajustes['ruc'] ) ? (string) $ajustes['ruc'] : '';
+		$sol     = isset( $ajustes['sol_usuario'] ) ? (string) $ajustes['sol_usuario'] : '';
+
+		$out = array(
+			'entorno'              => isset( $ajustes['entorno'] ) ? $ajustes['entorno'] : '',
+			'es_produccion'        => MSP_Emisor::es_produccion(),
+			'msp_cert_path_const'  => defined( 'MSP_CERT_PATH' ) ? (string) MSP_CERT_PATH : null,
+			'ruta_usada'           => MSP_Emisor::ruta_certificado(),
+			'ruc_emisor'           => $ruc,
+			'razon_social'         => isset( $ajustes['razon_social'] ) ? $ajustes['razon_social'] : '',
+			'sol_usuario'          => $sol,
+			'sol_es_por_defecto'   => ( 'MODDATOS' === $sol ),
+			'archivo_existe'       => false,
+			'archivo_legible'      => false,
+			'cert_valido'          => false,
+			'cert_cn'              => '',
+			'cert_ruc_coincide'    => false,
+			'cert_vence'           => '',
+			'cert_vigente'         => false,
+			'clave_privada_casa'   => false,
+			'mensaje'              => '',
+		);
+
+		$ruta = $out['ruta_usada'];
+		if ( ! $ruta ) {
+			$out['mensaje'] = 'No hay certificado configurado: define MSP_CERT_PATH en wp-config.php o el campo cert_path.';
+			return rest_ensure_response( $out );
+		}
+		if ( ! file_exists( $ruta ) ) {
+			$out['mensaje'] = 'La ruta está configurada pero el archivo no existe ahí. Revisa la ruta absoluta.';
+			return rest_ensure_response( $out );
+		}
+		$out['archivo_existe'] = true;
+
+		$contenido = @file_get_contents( $ruta ); // phpcs:ignore WordPress.WP.AlternativeFunctions,WordPress.PHP.NoSilencedErrors.Discouraged
+		if ( ! $contenido ) {
+			$out['mensaje'] = 'El archivo existe pero PHP no puede leerlo. Revisa permisos (0400/0440) y propietario.';
+			return rest_ensure_response( $out );
+		}
+		$out['archivo_legible'] = true;
+
+		if ( ! function_exists( 'openssl_x509_parse' ) ) {
+			$out['mensaje'] = 'El archivo se lee, pero la extensión OpenSSL no está disponible para validarlo.';
+			return rest_ensure_response( $out );
+		}
+
+		$cert = openssl_x509_parse( $contenido );
+		if ( false === $cert ) {
+			$out['mensaje'] = 'El archivo se lee pero no es un certificado PEM válido (¿subiste el .p12 en vez del .pem convertido?).';
+			return rest_ensure_response( $out );
+		}
+		$out['cert_valido'] = true;
+		$out['cert_cn']     = isset( $cert['subject']['CN'] ) ? $cert['subject']['CN'] : '';
+
+		// El RUC de SUNAT va en el subject (serialNumber o CN). Buscamos la cadena.
+		if ( $ruc ) {
+			$subject_txt = wp_json_encode( isset( $cert['subject'] ) ? $cert['subject'] : array() );
+			$out['cert_ruc_coincide'] = ( false !== strpos( (string) $subject_txt, $ruc ) );
+		}
+
+		if ( isset( $cert['validTo_time_t'] ) ) {
+			$out['cert_vence']   = gmdate( 'Y-m-d', (int) $cert['validTo_time_t'] );
+			$out['cert_vigente'] = ( time() < (int) $cert['validTo_time_t'] )
+				&& ( ! isset( $cert['validFrom_time_t'] ) || time() >= (int) $cert['validFrom_time_t'] );
+		}
+
+		if ( function_exists( 'openssl_x509_check_private_key' ) ) {
+			$out['clave_privada_casa'] = openssl_x509_check_private_key( $contenido, $contenido );
+		}
+
+		// Resumen legible.
+		if ( ! $out['cert_ruc_coincide'] ) {
+			$out['mensaje'] = 'ATENCIÓN: el certificado NO parece corresponder al RUC ' . $ruc . '. Verifica que subiste el certificado correcto.';
+		} elseif ( ! $out['clave_privada_casa'] ) {
+			$out['mensaje'] = 'El certificado es del RUC correcto, pero el PEM no incluye la clave privada que le corresponde. Reconvierte el .p12 con -nodes.';
+		} elseif ( ! $out['cert_vigente'] ) {
+			$out['mensaje'] = 'El certificado corresponde al RUC pero está fuera de vigencia (vence ' . $out['cert_vence'] . ').';
+		} else {
+			$out['mensaje'] = 'OK: certificado del RUC ' . $ruc . ', con su clave privada, vigente hasta ' . $out['cert_vence'] . '. Listo para firmar.';
+		}
+
+		return rest_ensure_response( $out );
 	}
 
 	/**

@@ -28,6 +28,10 @@ class MSP_Plugin {
 		$roles = new MSP_Roles();
 		$roles->init();
 
+		// API REST de gestión (sedes + stock en lote), namespace msp/v1.
+		$rest = new MSP_REST();
+		$rest->init();
+
 		// Módulo de sedes (Fase 1).
 		$sedes = new MSP_Sedes();
 		$sedes->init();

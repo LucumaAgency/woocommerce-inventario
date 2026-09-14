@@ -508,7 +508,9 @@ class MSP_POS {
 		$ticket_url = '';
 		$comprobante = MSP_Comprobante::obtener_por_pedido( $order->get_id() );
 		if ( $comprobante ) {
-			$ticket_url = MSP_Ticket::url( (int) $comprobante['id'] );
+			// Con la impresión automática encendida, el ticket se abre listo
+			// para mandarse a la impresora sin que el cajero pulse nada más.
+			$ticket_url = MSP_Ticket::url( (int) $comprobante['id'], MSP_Ticket_EscPos::ajustes()['auto'] );
 		}
 
 		wp_send_json_success(

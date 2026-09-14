@@ -12,6 +12,11 @@
  * binario de wkhtmltopdf, descontinuado) sería cargar megas y una dependencia
  * frágil para hacer lo que el navegador ya hace bien.
  *
+ * Excepción: las impresoras que no se ven desde el sistema de impresión de
+ * Android (la iMin Falcon 1, donde el diálogo de Chrome no las ofrece). Para
+ * ellas el mismo ticket sale también como comandos ESC/POS, que se entregan a
+ * RawBT desde el botón de abajo. Esa parte vive en `MSP_Ticket_EscPos`.
+ *
  * @package Multisede_POS
  */
 
@@ -40,15 +45,21 @@ class MSP_Ticket {
 	 * @param int $comprobante_id ID del comprobante.
 	 * @return string
 	 */
-	public static function url( $comprobante_id ) {
+	public static function url( $comprobante_id, $auto = false ) {
+		$args = array(
+			'action'      => self::ACTION,
+			'comprobante' => (int) $comprobante_id,
+		);
+
+		// `auto=1` hace que la página dispare sola la impresión por RawBT. Lo
+		// usa el POS: en mostrador, con el cliente delante, un clic menos por
+		// venta se nota.
+		if ( $auto ) {
+			$args['auto'] = 1;
+		}
+
 		return wp_nonce_url(
-			add_query_arg(
-				array(
-					'action'      => self::ACTION,
-					'comprobante' => (int) $comprobante_id,
-				),
-				admin_url( 'admin-post.php' )
-			),
+			add_query_arg( $args, admin_url( 'admin-post.php' ) ),
 			self::ACTION . '_' . (int) $comprobante_id
 		);
 	}
@@ -193,6 +204,12 @@ class MSP_Ticket {
 		$qr       = self::qr_svg( self::cadena_qr( $c ) );
 		$anulado  = in_array( $c['baja_estado'], array( 'anulado', 'enviada', 'pendiente' ), true );
 
+		// Salida ESC/POS para RawBT. Solo si está encendida y el comprobante ya
+		// volvió firmado: sin hash no hay QR válido y no se imprime nada.
+		$escpos  = MSP_Ticket_EscPos::activo() ? MSP_Ticket_EscPos::base64( $c ) : '';
+		$aj_esc  = MSP_Ticket_EscPos::ajustes();
+		$auto    = $escpos && $aj_esc['auto'] && ! empty( $_GET['auto'] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- El nonce lo valida servir() antes de llegar aquí.
+
 		nocache_headers();
 		header( 'Content-Type: text/html; charset=utf-8' );
 		?>
@@ -230,10 +247,13 @@ class MSP_Ticket {
 		padding: 3px; margin: 6px 0; letter-spacing: .1em;
 	}
 	.acciones { text-align: center; padding: 12px; }
-	.acciones button {
+	.acciones button, .acciones .btn {
 		font: inherit; font-size: 13px; padding: 8px 18px; cursor: pointer;
-		border: 1px solid #000; background: #fff;
+		border: 1px solid #000; background: #fff; display: inline-block;
+		text-decoration: none; color: #000;
 	}
+	.acciones .btn-primario { background: #000; color: #fff; font-weight: 700; }
+	.acciones .aviso { font-size: 11px; margin-top: 10px; padding: 8px; border: 1px dashed #000; }
 	@media print { .acciones { display: none; } }
 </style>
 </head>
@@ -370,7 +390,68 @@ class MSP_Ticket {
 </div>
 
 <div class="acciones">
-	<button type="button" onclick="window.print()"><?php esc_html_e( 'Imprimir', 'multisede-pos' ); ?></button>
+	<?php if ( $escpos ) : ?>
+		<?php
+		/* La impresora integrada de la Falcon 1 no aparece en el diálogo de
+		   Chrome, así que aquí no se imprime: se le entrega a RawBT el ticket
+		   ya convertido a comandos ESC/POS y RawBT habla con la impresora. */
+		?>
+		<a class="btn btn-primario" id="msp-rawbt" href="rawbt:base64,<?php echo esc_attr( $escpos ); ?>">
+			<?php esc_html_e( 'Imprimir en la impresora', 'multisede-pos' ); ?>
+		</a>
+		<button type="button" onclick="window.print()"><?php esc_html_e( 'Imprimir por el navegador', 'multisede-pos' ); ?></button>
+
+		<div class="aviso" id="msp-rawbt-alterno" hidden>
+			<strong><?php esc_html_e( 'No se abrió RawBT.', 'multisede-pos' ); ?></strong><br>
+			<?php esc_html_e( 'Si está instalado, prueba el formato alterno: algunas versiones de RawBT usan otro modo de recibir el trabajo.', 'multisede-pos' ); ?>
+			<br><br>
+			<a class="btn" href="intent:base64,<?php echo esc_attr( $escpos ); ?>#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;">
+				<?php esc_html_e( 'Probar formato alterno', 'multisede-pos' ); ?>
+			</a>
+			<a class="btn" href="https://play.google.com/store/apps/details?id=ru.a402d.rawbtprinter" target="_blank" rel="noopener">
+				<?php esc_html_e( 'Instalar RawBT', 'multisede-pos' ); ?>
+			</a>
+		</div>
+
+		<script>
+		( function () {
+			var enlace  = document.getElementById( 'msp-rawbt' );
+			var alterno = document.getElementById( 'msp-rawbt-alterno' );
+			var salio   = false;
+
+			/* Si RawBT abre, la pestaña deja de estar visible. Si a los 2,5 s
+			   seguimos aquí mirando la misma página, es que nadie recogió el
+			   trabajo: el cajero necesita saberlo, no quedarse esperando. */
+			function vigilar() {
+				salio = false;
+				window.setTimeout( function () {
+					if ( ! salio && ! document.hidden ) {
+						alterno.hidden = false;
+					}
+				}, 2500 );
+			}
+
+			document.addEventListener( 'visibilitychange', function () {
+				if ( document.hidden ) {
+					salio = true;
+				}
+			} );
+
+			enlace.addEventListener( 'click', vigilar );
+
+			<?php if ( $auto ) : ?>
+			/* Llega desde el POS con el cliente delante: se manda solo. */
+			window.setTimeout( function () {
+				vigilar();
+				window.location.href = enlace.getAttribute( 'href' );
+			}, 300 );
+			<?php endif; ?>
+		} )();
+		</script>
+	<?php else : ?>
+		<button type="button" onclick="window.print()"><?php esc_html_e( 'Imprimir', 'multisede-pos' ); ?></button>
+	<?php endif; ?>
+
 	<p style="font-size:11px">
 		<?php esc_html_e( 'Para guardarlo como PDF, elige "Guardar como PDF" en el destino de impresión.', 'multisede-pos' ); ?>
 	</p>

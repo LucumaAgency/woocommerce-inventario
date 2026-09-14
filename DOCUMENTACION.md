@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.20.4
+- **Versión actual:** 1.22.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -375,6 +375,18 @@ Lo que SUNAT tiene es el XML; lo que el cliente se lleva es el papel. Se sirve p
 - Fuera de producción el ticket lleva impreso *«DOCUMENTO DE PRUEBA — SIN VALOR»*.
 - **El PDF lo hace el navegador.** La página está maquetada a 80 mm con `@page size: 80mm auto`; el navegador la manda a la térmica o la guarda como PDF. Meter una librería de PDF —o el binario descontinuado de wkhtmltopdf— sería cargar megas y una dependencia frágil para lo que el navegador ya hace bien.
 
+### MSP_Ticket_EscPos (impresión en terminales Android — v1.22.0)
+Segunda salida del mismo ticket, en comandos **ESC/POS**, para impresoras que **no se ven desde el sistema de impresión de Android**. Es el caso de la **iMin Falcon 1**: su térmica integrada no aparece en el diálogo de Chrome, ni instalando un print service, así que `window.print()` no llega a ninguna parte. La vía que sí funciona es armar aquí los comandos y entregárselos a **RawBT** por su esquema de URL: el navegador no imprime, solo pasa el trabajo ya hecho.
+
+- `comandos( $c )` — el ticket completo en bytes: cabecera, líneas del pedido, totales, monto en letras, QR y corte de papel. **Devuelve vacío si el comprobante aún no tiene `hash`**, mismo criterio que el ticket HTML.
+- `base64( $c )` — lo anterior codificado, que es como lo recibe RawBT (`rawbt:base64,…`).
+- **El QR va por el comando nativo** de la impresora (`GS ( k`), no como imagen: más nítido, y decenas de bytes en vez de un bitmap. La cadena sigue siendo la de `MSP_Ticket::cadena_qr()`.
+- **La codificación es el punto frágil.** El texto se convierte con `iconv` a la página de códigos de la impresora (`ESC t`), configurable, porque es lo que decide si la `Ñ` y las tildes salen bien; el QR se añade **después** de convertir, porque son bytes y pasarlos por `iconv` los destruiría.
+- Ajustes en *Caja → Facturación*: activar, **ancho en caracteres** (42 o 48 según el área imprimible real del equipo), página de códigos, cortar papel, QR nativo, copias, e impresión automática al cerrar una venta en el POS.
+- El ticket HTML **no cambia**: en escritorio sigue siendo el camino normal, y en la Falcon queda como alternativa si RawBT falla.
+
+> **Dependencia de terceros, anotada a propósito:** RawBT es una app externa y queda en el camino crítico de cobrar en mostrador. Si cambia de esquema o desaparece del equipo, las cajas dejan de imprimir. La salida definitiva, si eso pasa, es una app envoltorio (WebView + SDK de iMin), que es alcance nuevo.
+
 **Roadmap de facturación** (plan completo: `PLAN-BOLETAS.md` en la carpeta del cliente): F1 base ✓ · F2 Greenter + emisión ✓ · F3 cola/reintentos/pantalla Comprobantes ✓ · F4 anulaciones (resumen diario) ✓ · F5 ticket con QR ✓. **Módulo de facturación completo.**
 
 ---
@@ -470,6 +482,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.9.2** | El correlativo va al XML con 8 dígitos (`B001-00000002`, no `B001-2`): el número registrado en SUNAT coincide con el del panel y el del ticket |
 | **1.9.1** | Numeración separada por entorno: `entorno` entra en la clave única (`entorno, serie, correlativo`), así las boletas de prueba dejan de gastar números de la serie real. La cola no envía un comprobante de otro entorno. **DB_VERSION 5** |
 | **1.9.0** | **Boletas Fase 3** — cola de emisión en segundo plano (Action Scheduler) con reintentos de espera creciente, alarma por correo a los 2 días, pantalla **Comprobantes** y captura de **DNI** en POS y checkout (obligatoria sobre S/ 700). Esquema **DB_VERSION 4** (`proximo_intento`, `alertado_at`) |
+| **1.22.0** | Impresión ESC/POS por RawBT (iMin Falcon 1) + ajustes de impresión |
 
 ---
 

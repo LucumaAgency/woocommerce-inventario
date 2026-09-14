@@ -25,6 +25,8 @@ Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas fís
 | 4 | POS de mostrador | ✅ Implementado |
 | 5 | Caja chica | ✅ Implementado |
 | + | Compra por tienda (stock por sede en la web) | ✅ Implementado (v1.1.0) |
+| + | Boletas electrónicas SUNAT (emisión, cola, anulación, ticket con QR) | ✅ Implementado |
+| + | Impresión ESC/POS por RawBT (terminales Android tipo iMin Falcon 1) | ✅ Implementado (v1.22.0) |
 
 ### Compra por tienda
 

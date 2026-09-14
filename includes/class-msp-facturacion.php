@@ -67,6 +67,18 @@ class MSP_Facturacion {
 
 			$nuevos['emision_automatica'] = ! empty( $_POST['emision_automatica'] ) ? 1 : 0;
 			$nuevos['simular_fallo']      = ! empty( $_POST['simular_fallo'] ) ? 1 : 0;
+
+			// Impresión ESC/POS (RawBT). Los límites los pone
+			// MSP_Ticket_EscPos::ajustes(); aquí solo se guarda lo que llega.
+			$nuevos['escpos_activo']    = ! empty( $_POST['escpos_activo'] ) ? 1 : 0;
+			$nuevos['escpos_cortar']    = ! empty( $_POST['escpos_cortar'] ) ? 1 : 0;
+			$nuevos['escpos_auto']      = ! empty( $_POST['escpos_auto'] ) ? 1 : 0;
+			$nuevos['escpos_qr_nativo'] = ! empty( $_POST['escpos_qr_nativo'] ) ? 1 : 0;
+			$nuevos['escpos_columnas']  = isset( $_POST['escpos_columnas'] ) ? (int) $_POST['escpos_columnas'] : 42;
+			$nuevos['escpos_copias']    = isset( $_POST['escpos_copias'] ) ? (int) $_POST['escpos_copias'] : 1;
+			$nuevos['escpos_codepage']  = isset( $_POST['escpos_codepage'] )
+				? sanitize_key( wp_unslash( $_POST['escpos_codepage'] ) )
+				: 'cp850';
 			update_option( self::opcion(), $nuevos );
 			$aviso = 'guardado';
 
@@ -311,6 +323,77 @@ class MSP_Facturacion {
 						</td>
 					</tr>
 				</table>
+
+				<h2><?php esc_html_e( 'Impresión del ticket (ESC/POS · RawBT)', 'multisede-pos' ); ?></h2>
+				<p class="description" style="max-width:44em">
+					<?php esc_html_e( 'Para terminales cuya impresora no aparece en el diálogo de impresión de Chrome, como la iMin Falcon 1. Con esto encendido, el ticket muestra un botón que le entrega el trabajo a la app RawBT en vez de intentar imprimir desde el navegador. El ticket normal sigue funcionando igual en escritorio.', 'multisede-pos' ); ?>
+				</p>
+				<?php $esc = MSP_Ticket_EscPos::ajustes(); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Activar', 'multisede-pos' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="escpos_activo" value="1" <?php checked( $esc['activo'] ); ?> />
+								<?php esc_html_e( 'Mostrar el botón de impresión por RawBT en el ticket', 'multisede-pos' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="escpos_columnas"><?php esc_html_e( 'Ancho en caracteres', 'multisede-pos' ); ?></label></th>
+						<td>
+							<input type="number" name="escpos_columnas" id="escpos_columnas" min="24" max="64" value="<?php echo esc_attr( $esc['columnas'] ); ?>" />
+							<p class="description">
+								<?php esc_html_e( 'En papel de 80 mm suelen entrar 48, pero el área imprimible real de algunos equipos deja 42. Imprime una regla de prueba desde RawBT y cuenta dónde corta: de este número depende que no se recorten los nombres de los productos.', 'multisede-pos' ); ?>
+							</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="escpos_codepage"><?php esc_html_e( 'Página de códigos', 'multisede-pos' ); ?></label></th>
+						<td>
+							<select name="escpos_codepage" id="escpos_codepage">
+								<?php foreach ( MSP_Ticket_EscPos::paginas_codigos() as $clave => $datos ) : ?>
+									<option value="<?php echo esc_attr( $clave ); ?>" <?php selected( $esc['codepage'], $clave ); ?>>
+										<?php echo esc_html( $datos[0] ); ?>
+									</option>
+								<?php endforeach; ?>
+							</select>
+							<p class="description">
+								<?php esc_html_e( 'Decide si la Ñ y las tildes salen bien. Si en el papel ves caracteres raros, prueba otra: es lo primero que hay que ajustar.', 'multisede-pos' ); ?>
+							</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Comportamiento', 'multisede-pos' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="escpos_cortar" value="1" <?php checked( $esc['cortar'] ); ?> />
+								<?php esc_html_e( 'Cortar el papel al terminar', 'multisede-pos' ); ?>
+							</label><br>
+							<label>
+								<input type="checkbox" name="escpos_qr_nativo" value="1" <?php checked( $esc['qr_nativo'] ); ?> />
+								<?php esc_html_e( 'Imprimir el QR con el comando propio de la impresora', 'multisede-pos' ); ?>
+							</label>
+							<p class="description">
+								<?php esc_html_e( 'Sale más nítido y más rápido que mandarlo como imagen. Si tu impresora no lo soporta, saldrá un QR en blanco: apágalo y el ticket se imprime sin él (imprime entonces por el navegador para el QR).', 'multisede-pos' ); ?>
+							</p>
+							<label>
+								<input type="checkbox" name="escpos_auto" value="1" <?php checked( $esc['auto'] ); ?> />
+								<?php esc_html_e( 'Imprimir solo al terminar una venta en el POS', 'multisede-pos' ); ?>
+							</label>
+							<p class="description">
+								<?php esc_html_e( 'Un clic menos por venta en mostrador. El ticket se abre y manda la impresión sin esperar.', 'multisede-pos' ); ?>
+							</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="escpos_copias"><?php esc_html_e( 'Copias', 'multisede-pos' ); ?></label></th>
+						<td>
+							<input type="number" name="escpos_copias" id="escpos_copias" min="1" max="3" value="<?php echo esc_attr( $esc['copias'] ); ?>" />
+						</td>
+					</tr>
+				</table>
+
 				<?php submit_button( __( 'Guardar ajustes', 'multisede-pos' ) ); ?>
 			</form>
 

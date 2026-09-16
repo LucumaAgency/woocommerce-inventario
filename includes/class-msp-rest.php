@@ -256,6 +256,8 @@ class MSP_REST {
 			'direccion'       => get_post_meta( $id, '_msp_direccion', true ),
 			'horario'         => get_post_meta( $id, '_msp_horario', true ),
 			'serie_boleta'    => get_post_meta( $id, '_msp_serie_boleta', true ),
+			'serie_factura'   => get_post_meta( $id, '_msp_serie_factura', true ),
+			'emisor_ruc'      => class_exists( 'MSP_Emisor' ) ? MSP_Emisor::ruc_de_sede( $id ) : '',
 			'vende_web'       => '1' === get_post_meta( $id, '_msp_vende_web', true ),
 			'vende_mostrador' => '1' === get_post_meta( $id, '_msp_vende_mostrador', true ),
 			'es_virtual'      => '1' === get_post_meta( $id, '_msp_es_virtual', true ),
@@ -293,13 +295,29 @@ class MSP_REST {
 	 */
 	private function aplicar_meta_sede( $id, $req ) {
 		$texto = array(
-			'direccion'    => '_msp_direccion',
-			'horario'      => '_msp_horario',
-			'serie_boleta' => '_msp_serie_boleta',
+			'direccion'     => '_msp_direccion',
+			'horario'       => '_msp_horario',
+			'serie_boleta'  => '_msp_serie_boleta',
+			'serie_factura' => '_msp_serie_factura',
 		);
 		foreach ( $texto as $param => $meta ) {
 			if ( null !== $req->get_param( $param ) ) {
-				update_post_meta( $id, $meta, sanitize_text_field( (string) $req->get_param( $param ) ) );
+				$valor = strtoupper( sanitize_text_field( (string) $req->get_param( $param ) ) );
+				if ( '' === $valor ) {
+					delete_post_meta( $id, $meta );
+					continue;
+				}
+				update_post_meta( $id, $meta, $valor );
+			}
+		}
+
+		// Empresa emisora de la sede (multi-RUC).
+		if ( null !== $req->get_param( 'emisor_ruc' ) ) {
+			$ruc = preg_replace( '/[^0-9]/', '', (string) $req->get_param( 'emisor_ruc' ) );
+			if ( $ruc && class_exists( 'MSP_Emisor' ) && isset( MSP_Emisor::emisores()[ $ruc ] ) ) {
+				update_post_meta( $id, MSP_Emisor::META_EMISOR, $ruc );
+			} else {
+				delete_post_meta( $id, MSP_Emisor::META_EMISOR );
 			}
 		}
 		$flags = array(
@@ -327,13 +345,31 @@ class MSP_REST {
 			return new WP_Error( 'msp_falta_nombre', 'Falta el nombre de la sede.', array( 'status' => 400 ) );
 		}
 
-		$serie = $req->get_param( 'serie_boleta' );
-		if ( $serie ) {
-			$dup = $this->serie_en_uso( sanitize_text_field( (string) $serie ), 0 );
+		foreach ( array( 'serie_boleta' => 'boleta', 'serie_factura' => 'factura' ) as $param => $tipo ) {
+			$serie = $req->get_param( $param );
+			if ( ! $serie ) {
+				continue;
+			}
+			$serie = strtoupper( sanitize_text_field( (string) $serie ) );
+
+			if ( ! MSP_Comprobante::serie_valida( $serie, $tipo ) ) {
+				return new WP_Error(
+					'msp_serie_invalida',
+					sprintf(
+						'La serie %s no vale para una %s: debe empezar con "%s" y tener 4 caracteres.',
+						$serie,
+						$tipo,
+						MSP_Comprobante::dato_tipo( $tipo, 'prefijo' )
+					),
+					array( 'status' => 400 )
+				);
+			}
+
+			$dup = $this->serie_en_uso( $serie, 0 );
 			if ( $dup ) {
 				return new WP_Error(
 					'msp_serie_duplicada',
-					sprintf( 'La serie %s ya la usa la sede #%d.', $serie, $dup ),
+					sprintf( 'La serie %s ya la usa la sede #%d del mismo RUC.', $serie, $dup ),
 					array( 'status' => 409 )
 				);
 			}
@@ -385,13 +421,31 @@ class MSP_REST {
 			}
 		}
 
-		$serie = $req->get_param( 'serie_boleta' );
-		if ( $serie ) {
-			$dup = $this->serie_en_uso( sanitize_text_field( (string) $serie ), $id );
+		foreach ( array( 'serie_boleta' => 'boleta', 'serie_factura' => 'factura' ) as $param => $tipo ) {
+			$serie = $req->get_param( $param );
+			if ( ! $serie ) {
+				continue;
+			}
+			$serie = strtoupper( sanitize_text_field( (string) $serie ) );
+
+			if ( ! MSP_Comprobante::serie_valida( $serie, $tipo ) ) {
+				return new WP_Error(
+					'msp_serie_invalida',
+					sprintf(
+						'La serie %s no vale para una %s: debe empezar con "%s" y tener 4 caracteres.',
+						$serie,
+						$tipo,
+						MSP_Comprobante::dato_tipo( $tipo, 'prefijo' )
+					),
+					array( 'status' => 400 )
+				);
+			}
+
+			$dup = $this->serie_en_uso( $serie, $id );
 			if ( $dup ) {
 				return new WP_Error(
 					'msp_serie_duplicada',
-					sprintf( 'La serie %s ya la usa la sede #%d.', $serie, $dup ),
+					sprintf( 'La serie %s ya la usa la sede #%d del mismo RUC.', $serie, $dup ),
 					array( 'status' => 409 )
 				);
 			}
@@ -437,18 +491,37 @@ class MSP_REST {
 	 * @return int ID de la sede en conflicto, o 0.
 	 */
 	private function serie_en_uso( $serie, $excluir ) {
+		$serie = strtoupper( trim( (string) $serie ) );
 		if ( '' === $serie ) {
 			return 0;
 		}
+
+		// Se miran las dos series y se respeta el emisor: la misma serie en dos
+		// empresas distintas es legítima. Misma regla que el panel, en un solo
+		// sitio (MSP_Comprobante), para que la API no valide distinto que la
+		// pantalla de sedes.
+		if ( ! MSP_Comprobante::serie_en_uso( $serie, (int) $excluir ) ) {
+			return 0;
+		}
+
 		$posts = get_posts(
 			array(
 				'post_type'   => MSP_Sedes::CPT,
 				'post_status' => 'any',
 				'numberposts' => -1,
-				'meta_key'    => '_msp_serie_boleta',
-				'meta_value'  => $serie,
 				'exclude'     => array( (int) $excluir ),
 				'fields'      => 'ids',
+				'meta_query'  => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+					'relation' => 'OR',
+					array(
+						'key'   => '_msp_serie_boleta',
+						'value' => $serie,
+					),
+					array(
+						'key'   => '_msp_serie_factura',
+						'value' => $serie,
+					),
+				),
 			)
 		);
 		return $posts ? (int) $posts[0] : 0;

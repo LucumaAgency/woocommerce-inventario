@@ -74,6 +74,9 @@ class MSP_Ticket {
 	 * RUC | tipo | serie | correlativo | IGV | total | fecha | tipo doc cliente |
 	 * nro doc cliente | hash de la firma
 	 *
+	 * El tipo sale del comprobante ('03' boleta, '01' factura): un QR que
+	 * declara boleta sobre una factura no lo reconoce el verificador.
+	 *
 	 * @param array $c Fila del comprobante.
 	 * @return string
 	 */
@@ -84,13 +87,17 @@ class MSP_Ticket {
 			'|',
 			array(
 				$a['ruc'],
-				'03',
+				MSP_Comprobante::codigo_sunat( $c ),
 				$c['serie'],
 				(int) $c['correlativo'],
 				number_format( (float) $c['igv'], 2, '.', '' ),
 				number_format( (float) $c['total'], 2, '.', '' ),
 				gmdate( 'Y-m-d', strtotime( $c['emitido_at'] ) ),
-				$c['cliente_num_doc'] ? '1' : '0',
+				// Tipo de documento del comprador (catálogo 06), no un '1' fijo:
+				// en una factura es RUC ('6') y el verificador de SUNAT compara
+				// este campo con el del XML. Si no coinciden, no reconoce el
+				// comprobante aunque todo lo demás esté bien.
+				$c['cliente_num_doc'] ? ( $c['cliente_tipo_doc'] ? $c['cliente_tipo_doc'] : '1' ) : '0',
 				$c['cliente_num_doc'] ? $c['cliente_num_doc'] : '-',
 				$c['hash'],
 			)
@@ -273,7 +280,7 @@ class MSP_Ticket {
 <hr>
 
 <div class="c b">
-	<?php esc_html_e( 'BOLETA DE VENTA ELECTRÓNICA', 'multisede-pos' ); ?><br>
+	<?php echo esc_html( mb_strtoupper( MSP_Comprobante::dato_tipo( $c['tipo'], 'etiqueta' ) ) ); ?><br>
 	<?php echo esc_html( MSP_Comprobante::numero( $c ) ); ?>
 </div>
 
@@ -296,7 +303,7 @@ class MSP_Ticket {
 	</tr>
 	<?php if ( $c['cliente_num_doc'] ) : ?>
 		<tr>
-			<td><?php esc_html_e( 'DNI', 'multisede-pos' ); ?></td>
+			<td><?php echo esc_html( 'factura' === MSP_Comprobante::tipo_valido( $c['tipo'] ) ? __( 'RUC', 'multisede-pos' ) : __( 'DNI', 'multisede-pos' ) ); ?></td>
 			<td class="n"><?php echo esc_html( $c['cliente_num_doc'] ); ?></td>
 		</tr>
 	<?php endif; ?>
@@ -382,7 +389,13 @@ class MSP_Ticket {
 <?php endif; ?>
 
 <div class="legal">
-	<?php esc_html_e( 'Representación impresa de la boleta de venta electrónica.', 'multisede-pos' ); ?><br>
+	<?php
+	printf(
+		/* translators: %s: nombre del comprobante en minúsculas ("boleta de venta electrónica" o "factura electrónica"). */
+		esc_html__( 'Representación impresa de la %s.', 'multisede-pos' ),
+		esc_html( mb_strtolower( MSP_Comprobante::dato_tipo( $c['tipo'], 'etiqueta' ) ) )
+	);
+	?><br>
 	<?php esc_html_e( 'Consúltala en www.sunat.gob.pe', 'multisede-pos' ); ?>
 	<?php if ( ! MSP_Emisor::es_produccion() ) : ?>
 		<br><strong><?php esc_html_e( '*** DOCUMENTO DE PRUEBA — SIN VALOR ***', 'multisede-pos' ); ?></strong>

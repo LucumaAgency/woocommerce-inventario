@@ -195,6 +195,7 @@ class MSP_Comprobantes {
 			'rechazada'      => array( __( 'SUNAT rechazó la baja', 'multisede-pos' ), '#b32d2e' ),
 			'fuera_de_plazo' => array( __( 'Fuera de plazo: requiere nota de crédito', 'multisede-pos' ), '#b32d2e' ),
 			'no_aplica'      => array( __( 'Anulada antes de emitirse', 'multisede-pos' ), '#50575e' ),
+			'manual'         => array( __( 'Anular en el portal de SUNAT', 'multisede-pos' ), '#b32d2e' ),
 		);
 		return isset( $mapa[ $baja ] ) ? $mapa[ $baja ] : array();
 	}

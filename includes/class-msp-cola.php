@@ -131,11 +131,16 @@ class MSP_Cola {
 			return new WP_Error( 'msp_total_cero', __( 'No se emite comprobante de un pedido sin importe.', 'multisede-pos' ) );
 		}
 
+		// El tipo lo decide el pedido: la web y el POS marcan `factura` cuando
+		// el cliente la pidió y dio su RUC. Ante cualquier duda, boleta, que es
+		// lo que siempre se puede emitir.
+		$tipo = MSP_Comprobante::tipo_valido( $order->get_meta( '_msp_tipo_comprobante' ) );
+
 		$comprobante = MSP_Comprobante::reservar(
 			array(
 				'sede_id'          => $sede_id,
 				'pedido_id'        => $pedido_id,
-				'tipo'             => 'boleta',
+				'tipo'             => $tipo,
 				'cliente_tipo_doc' => $order->get_meta( '_msp_cliente_tipo_doc' ) ? $order->get_meta( '_msp_cliente_tipo_doc' ) : '0',
 				'cliente_num_doc'  => (string) $order->get_meta( '_msp_cliente_num_doc' ),
 				'cliente_nombre'   => self::nombre_cliente( $order ),
@@ -161,8 +166,9 @@ class MSP_Cola {
 		$order->update_meta_data( '_msp_comprobante_id', (int) $comprobante['id'] );
 		$order->add_order_note(
 			sprintf(
-				/* translators: %s: número del comprobante. */
-				__( 'Comprobante %s reservado y encolado para envío a SUNAT.', 'multisede-pos' ),
+				/* translators: 1: tipo de comprobante, 2: número del comprobante. */
+				__( '%1$s %2$s reservada y encolada para envío a SUNAT.', 'multisede-pos' ),
+				MSP_Comprobante::dato_tipo( $comprobante['tipo'], 'corto' ),
 				MSP_Comprobante::numero( $comprobante )
 			)
 		);

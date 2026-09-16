@@ -747,9 +747,13 @@ class MSP_Emisor {
 			->setRazonSocial( $a['razon_social'] )
 			->setAddress( $direccion );
 
-		// Por defecto, consumidor final. La captura de DNI llega en Fase 3.
+		$es_factura = 'factura' === MSP_Comprobante::tipo_valido( isset( $c['tipo'] ) ? $c['tipo'] : 'boleta' );
+
+		// En la boleta el comprador puede ser consumidor final; en la factura
+		// no existe tal cosa: siempre RUC y razón social. La reserva ya lo exige
+		// antes de gastar correlativo, así que aquí solo se refleja.
 		$cliente = ( new \Greenter\Model\Client\Client() )
-			->setTipoDoc( $c['cliente_tipo_doc'] ? $c['cliente_tipo_doc'] : '0' )
+			->setTipoDoc( $es_factura ? MSP_Comprobante::DOC_RUC : ( $c['cliente_tipo_doc'] ? $c['cliente_tipo_doc'] : '0' ) )
 			->setNumDoc( $c['cliente_num_doc'] ? $c['cliente_num_doc'] : '-' )
 			->setRznSocial( $c['cliente_nombre'] ? $c['cliente_nombre'] : 'CLIENTE VARIOS' );
 
@@ -771,7 +775,7 @@ class MSP_Emisor {
 		return ( new \Greenter\Model\Sale\Invoice() )
 			->setUblVersion( '2.1' )
 			->setTipoOperacion( '0101' )
-			->setTipoDoc( '03' )
+			->setTipoDoc( MSP_Comprobante::codigo_sunat( $c ) )
 			->setSerie( $c['serie'] )
 			// Correlativo a 8 dígitos, el mismo formato que muestra el panel y que
 			// irá impreso en el ticket. SUNAT acepta ambas formas, pero sin el

@@ -25,6 +25,88 @@ class MSP_Comprobante {
 	const META_SERIE = '_msp_serie_boleta';
 
 	/**
+	 * Meta de la sede donde vive su serie de facturas (ej. F001).
+	 */
+	const META_SERIE_FACTURA = '_msp_serie_factura';
+
+	/**
+	 * Tipo de documento de identidad de SUNAT para el RUC (catálogo 06).
+	 *
+	 * En una factura el comprador se identifica SIEMPRE con RUC; no hay
+	 * "consumidor final" que valga.
+	 */
+	const DOC_RUC = '6';
+
+	/**
+	 * Los dos tipos de comprobante que emite el sistema.
+	 *
+	 * Todo lo que distingue una factura de una boleta está aquí: su código de
+	 * SUNAT (catálogo 01), la letra con la que empieza su serie, la meta de la
+	 * sede donde vive esa serie y cómo se llama en pantalla y en el papel. El
+	 * resto del motor —firma, envío, cola, conservación— no distingue entre
+	 * ambos, y esa es justamente la idea.
+	 *
+	 * @return array
+	 */
+	public static function tipos() {
+		return array(
+			'boleta'  => array(
+				'codigo'    => '03',
+				'prefijo'   => 'B',
+				'meta'      => self::META_SERIE,
+				'etiqueta'  => __( 'Boleta de venta electrónica', 'multisede-pos' ),
+				'corto'     => __( 'Boleta', 'multisede-pos' ),
+			),
+			'factura' => array(
+				'codigo'    => '01',
+				'prefijo'   => 'F',
+				'meta'      => self::META_SERIE_FACTURA,
+				'etiqueta'  => __( 'Factura electrónica', 'multisede-pos' ),
+				'corto'     => __( 'Factura', 'multisede-pos' ),
+			),
+		);
+	}
+
+	/**
+	 * Normaliza un tipo, cayendo a boleta ante cualquier cosa rara.
+	 *
+	 * La boleta es el valor seguro: se puede emitir siempre, mientras que la
+	 * factura exige RUC y razón social del comprador.
+	 *
+	 * @param string $tipo Tipo.
+	 * @return string 'boleta' o 'factura'.
+	 */
+	public static function tipo_valido( $tipo ) {
+		$tipo = sanitize_key( (string) $tipo );
+		return isset( self::tipos()[ $tipo ] ) ? $tipo : 'boleta';
+	}
+
+	/**
+	 * Un dato del tipo de comprobante.
+	 *
+	 * @param string $tipo  Tipo.
+	 * @param string $clave codigo|prefijo|meta|etiqueta|corto.
+	 * @return string
+	 */
+	public static function dato_tipo( $tipo, $clave ) {
+		$tipos = self::tipos();
+		return $tipos[ self::tipo_valido( $tipo ) ][ $clave ];
+	}
+
+	/**
+	 * Código de SUNAT del comprobante (catálogo 01): '03' boleta, '01' factura.
+	 *
+	 * @param array|string $comprobante Fila del comprobante, o el tipo suelto.
+	 * @return string
+	 */
+	public static function codigo_sunat( $comprobante ) {
+		$tipo = is_array( $comprobante )
+			? ( isset( $comprobante['tipo'] ) ? $comprobante['tipo'] : 'boleta' )
+			: $comprobante;
+		return self::dato_tipo( $tipo, 'codigo' );
+	}
+
+	/**
 	 * Reintentos máximos al reservar un correlativo cuando dos cajeros chocan.
 	 */
 	const MAX_REINTENTOS_RESERVA = 25;
@@ -62,26 +144,30 @@ class MSP_Comprobante {
 	}
 
 	/**
-	 * Serie de boletas configurada en una sede.
+	 * Serie configurada en una sede para un tipo de comprobante.
 	 *
-	 * @param int $sede_id ID de la sede.
-	 * @return string Serie (ej. 'B001') o '' si no está configurada.
+	 * @param int    $sede_id ID de la sede.
+	 * @param string $tipo    'boleta' o 'factura'.
+	 * @return string Serie (ej. 'B001', 'F001') o '' si no está configurada.
 	 */
-	public static function serie_de_sede( $sede_id ) {
-		$serie = get_post_meta( (int) $sede_id, self::META_SERIE, true );
+	public static function serie_de_sede( $sede_id, $tipo = 'boleta' ) {
+		$serie = get_post_meta( (int) $sede_id, self::dato_tipo( $tipo, 'meta' ), true );
 		return is_string( $serie ) ? strtoupper( trim( $serie ) ) : '';
 	}
 
 	/**
-	 * Valida el formato de serie de boleta que exige SUNAT.
+	 * Valida el formato de serie que exige SUNAT.
 	 *
-	 * Regla: 4 posiciones alfanuméricas que empiezan con "B". Ej: B001.
+	 * Regla: 4 posiciones alfanuméricas que empiezan con "B" en las boletas y
+	 * con "F" en las facturas. Ej: B001, F001.
 	 *
 	 * @param string $serie Serie a validar.
+	 * @param string $tipo  'boleta' o 'factura'.
 	 * @return bool
 	 */
-	public static function serie_valida( $serie ) {
-		return (bool) preg_match( '/^B[0-9A-Z]{3}$/', strtoupper( trim( (string) $serie ) ) );
+	public static function serie_valida( $serie, $tipo = 'boleta' ) {
+		$prefijo = self::dato_tipo( $tipo, 'prefijo' );
+		return (bool) preg_match( '/^' . $prefijo . '[0-9A-Z]{3}$/', strtoupper( trim( (string) $serie ) ) );
 	}
 
 	/**
@@ -100,14 +186,26 @@ class MSP_Comprobante {
 			return false;
 		}
 
+		// Se buscan las DOS metas, no solo la del tipo que se está guardando:
+		// una serie repetida entre una boleta y una factura de sedes distintas
+		// seguiría siendo dos documentos compartiendo numeración.
 		$args = array(
 			'post_type'      => MSP_Sedes::CPT,
 			'post_status'    => 'any',
 			'posts_per_page' => 1,
 			'fields'         => 'ids',
 			'post__not_in'   => array( (int) $excluir_sede_id ),
-			'meta_key'       => self::META_SERIE,
-			'meta_value'     => $serie,
+			'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Una sola sede, al guardar.
+				'relation' => 'OR',
+				array(
+					'key'   => self::META_SERIE,
+					'value' => $serie,
+				),
+				array(
+					'key'   => self::META_SERIE_FACTURA,
+					'value' => $serie,
+				),
+			),
 		);
 
 		return ! empty( get_posts( $args ) );
@@ -144,16 +242,33 @@ class MSP_Comprobante {
 			return new WP_Error( 'msp_sin_sede', __( 'Falta la sede emisora del comprobante.', 'multisede-pos' ) );
 		}
 
-		$serie = self::serie_de_sede( $sede_id );
-		if ( ! self::serie_valida( $serie ) ) {
+		$tipo  = self::tipo_valido( isset( $datos['tipo'] ) ? $datos['tipo'] : 'boleta' );
+		$serie = self::serie_de_sede( $sede_id, $tipo );
+		if ( ! self::serie_valida( $serie, $tipo ) ) {
 			return new WP_Error(
 				'msp_serie_invalida',
 				sprintf(
-					/* translators: %d: ID de la sede. */
-					__( 'La sede %d no tiene una serie de boleta válida (ej. B001). Configúrala en la sede.', 'multisede-pos' ),
-					$sede_id
+					/* translators: 1: nombre del tipo de comprobante, 2: ID de la sede, 3: ejemplo de serie. */
+					__( 'La sede %2$d no tiene una serie de %1$s válida (ej. %3$s). Configúrala en la sede.', 'multisede-pos' ),
+					strtolower( self::dato_tipo( $tipo, 'corto' ) ),
+					$sede_id,
+					self::dato_tipo( $tipo, 'prefijo' ) . '001'
 				)
 			);
+		}
+
+		// Una factura sin RUC y razón social del comprador la rechaza SUNAT.
+		// Mejor pararla aquí, antes de gastar un correlativo que luego habría
+		// que dejar anulado, que descubrirlo en la respuesta del envío.
+		if ( 'factura' === $tipo ) {
+			$num_doc = isset( $datos['cliente_num_doc'] ) ? preg_replace( '/[^0-9]/', '', (string) $datos['cliente_num_doc'] ) : '';
+			$nombre  = isset( $datos['cliente_nombre'] ) ? trim( (string) $datos['cliente_nombre'] ) : '';
+			if ( 11 !== strlen( $num_doc ) || '' === $nombre ) {
+				return new WP_Error(
+					'msp_factura_sin_comprador',
+					__( 'Una factura necesita el RUC (11 dígitos) y la razón social del cliente.', 'multisede-pos' )
+				);
+			}
 		}
 
 		$tabla   = self::tabla();
@@ -180,7 +295,7 @@ class MSP_Comprobante {
 				array(
 					'pedido_id'        => isset( $datos['pedido_id'] ) ? (int) $datos['pedido_id'] : null,
 					'sede_id'          => $sede_id,
-					'tipo'             => isset( $datos['tipo'] ) ? sanitize_key( $datos['tipo'] ) : 'boleta',
+					'tipo'             => $tipo,
 					'entorno'          => $entorno,
 					'serie'            => $serie,
 					'correlativo'      => $siguiente,

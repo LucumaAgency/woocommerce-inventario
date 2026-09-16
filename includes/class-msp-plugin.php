@@ -48,6 +48,10 @@ class MSP_Plugin {
 		$checkout_pe = new MSP_Checkout_PE();
 		$checkout_pe->init();
 
+		// Factura electrónica en el checkout web (RUC y razón social).
+		$factura = new MSP_Factura();
+		$factura->init();
+
 		// Compra por tienda en el frontend (stock de la sede elegida).
 		$frontend = new MSP_Frontend();
 		$frontend->init();

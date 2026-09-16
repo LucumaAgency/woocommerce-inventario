@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.22.0
+- **Versión actual:** 1.23.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -375,6 +375,27 @@ Lo que SUNAT tiene es el XML; lo que el cliente se lleva es el papel. Se sirve p
 - Fuera de producción el ticket lleva impreso *«DOCUMENTO DE PRUEBA — SIN VALOR»*.
 - **El PDF lo hace el navegador.** La página está maquetada a 80 mm con `@page size: 80mm auto`; el navegador la manda a la térmica o la guarda como PDF. Meter una librería de PDF —o el binario descontinuado de wkhtmltopdf— sería cargar megas y una dependencia frágil para lo que el navegador ya hace bien.
 
+### MSP_Factura (factura electrónica en el canal web — v1.23.0)
+Una boleta se emite siempre; la **factura no**: exige **RUC y razón social del comprador**, y sin eso SUNAT la rechaza. Por eso el checkout tiene que preguntarlo **antes** de cobrar.
+
+Esta clase solo **decora el pedido** — marca `_msp_tipo_comprobante` y guarda al comprador. Quién emite, cuándo y cómo no cambia: sigue siendo la cola, con el mismo motor que ya emite boletas. Por eso aquí no hay una sola línea que hable con SUNAT.
+
+- Campos nativos en el checkout (prioridades 130-133, tras el DNI): casilla **«Necesito factura (con RUC)»**, RUC, razón social y dirección fiscal opcional. Se muestran u ocultan con JS inline; si el JS no corre se ven siempre y **el servidor es quien valida**.
+- `ruc_valido()` — 11 dígitos, tipo conocido (10, 15, 17, 20) y **dígito verificador módulo 11**, todo en local. No se consulta el RUC contra ningún servicio (decisión razonada en `PLAN-FACTURAS.md`), pero el verificador ataja el error más común —un dígito mal tecleado— que si no aparecería como un rechazo de SUNAT con el pedido ya cobrado.
+- `disponible()` — si **ninguna sede tiene serie de factura**, el checkout no enseña nada: ofrecer una factura que luego no se puede emitir es peor que no ofrecerla.
+- Valida también que **la sede elegida** tenga serie de factura, y lo dice en términos de tienda ("elige otra tienda o quita la casilla").
+
+### El tipo de comprobante (v1.23.0)
+`MSP_Comprobante::tipos()` concentra **todo lo que distingue una factura de una boleta**: su código de SUNAT (`01` / `03`), la letra de su serie (`F` / `B`), la meta de la sede donde vive esa serie y cómo se llama en pantalla. El resto del motor —firma, envío, cola, conservación, ticket— no distingue entre ambos, y esa es la idea.
+
+- **Serie de factura por sede** (`_msp_serie_factura`), con su campo en la sede. La unicidad se comprueba contra **las dos metas**: una serie repetida entre boleta y factura seguirían siendo dos documentos compartiendo numeración.
+- **La reserva rechaza una factura sin RUC ni razón social** antes de gastar correlativo. Descubrirlo en la respuesta del envío dejaría un número reservado que habría que anular.
+- En el XML, `setTipoDoc()` sale del tipo y el cliente va con **tipo de documento 6 (RUC)**.
+- En el **QR**, el tipo de comprobante y el **tipo de documento del comprador** salen del comprobante. Antes el tipo de documento era un `'1'` fijo (DNI): en una factura el verificador de SUNAT lo compara con el del XML y no reconocería el comprobante.
+- **Anulación:** el resumen diario de bajas es SOLO para boletas. Una factura aceptada se marca `baja_estado = manual` con una nota que lo dice: se anula por comunicación de baja o se corrige con nota de crédito, y eso **todavía se hace en el portal de SUNAT**. Meterla en el resumen produciría un documento que SUNAT rechaza y un comprobante "anulado" en el panel que sigue vivo ante SUNAT — peor que no intentarlo, porque nadie volvería a mirarlo.
+
+> **Lo que falta para que las facturas estén completas:** notas de crédito (`07`) y comunicación de baja (`RA`), ~1,5-2 días cada una. Hasta entonces, una factura equivocada se arregla en el portal.
+
 ### MSP_Ticket_EscPos (impresión en terminales Android — v1.22.0)
 Segunda salida del mismo ticket, en comandos **ESC/POS**, para impresoras que **no se ven desde el sistema de impresión de Android**. Es el caso de la **iMin Falcon 1**: su térmica integrada no aparece en el diálogo de Chrome, ni instalando un print service, así que `window.print()` no llega a ninguna parte. La vía que sí funciona es armar aquí los comandos y entregárselos a **RawBT** por su esquema de URL: el navegador no imprime, solo pasa el trabajo ya hecho.
 
@@ -483,6 +504,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.9.1** | Numeración separada por entorno: `entorno` entra en la clave única (`entorno, serie, correlativo`), así las boletas de prueba dejan de gastar números de la serie real. La cola no envía un comprobante de otro entorno. **DB_VERSION 5** |
 | **1.9.0** | **Boletas Fase 3** — cola de emisión en segundo plano (Action Scheduler) con reintentos de espera creciente, alarma por correo a los 2 días, pantalla **Comprobantes** y captura de **DNI** en POS y checkout (obligatoria sobre S/ 700). Esquema **DB_VERSION 4** (`proximo_intento`, `alertado_at`) |
 | **1.22.0** | Impresión ESC/POS por RawBT (iMin Falcon 1) + ajustes de impresión |
+| **1.23.0** | **Facturas electrónicas en el canal web** — serie de factura por sede, captura de RUC y razón social en el checkout, tipo de documento en XML y QR |
 
 ---
 

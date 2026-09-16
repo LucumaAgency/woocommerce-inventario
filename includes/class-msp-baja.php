@@ -141,6 +141,31 @@ class MSP_Baja {
 			return;
 		}
 
+		// ⚠️ El resumen diario de bajas es SOLO para boletas. Una factura
+		// aceptada se anula por comunicación de baja (RA) o se corrige con nota
+		// de crédito, y ninguna de las dos está construida. Meterla en el
+		// resumen produciría un documento que SUNAT rechaza, y el comprobante
+		// quedaría "anulado" en el panel sin estarlo ante SUNAT: peor que no
+		// intentarlo, porque nadie volvería a mirarlo.
+		if ( 'factura' === MSP_Comprobante::tipo_valido( $c['tipo'] ) ) {
+			MSP_Comprobante::actualizar(
+				(int) $c['id'],
+				array(
+					'baja_estado' => 'manual',
+					'anulado_at'  => current_time( 'mysql' ),
+				)
+			);
+			$order->add_order_note(
+				sprintf(
+					/* translators: %s: número del comprobante. */
+					__( 'ATENCIÓN: la factura %s NO se puede anular desde el sistema. Las facturas se anulan por comunicación de baja o se corrigen con una nota de crédito, y eso todavía se hace en el portal de SUNAT. La venta queda anulada aquí, pero el comprobante sigue vivo ante SUNAT hasta que alguien lo comunique.', 'multisede-pos' ),
+					MSP_Comprobante::numero( $c )
+				)
+			);
+			$order->save();
+			return;
+		}
+
 		$dias = MSP_Resumen::dias_de_plazo( $c );
 
 		if ( $dias < 0 ) {

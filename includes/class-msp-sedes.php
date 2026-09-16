@@ -119,6 +119,7 @@ class MSP_Sedes {
 		$es_virtual      = get_post_meta( $post->ID, '_msp_es_virtual', true );
 		$activa          = get_post_meta( $post->ID, '_msp_activa', true );
 		$serie_boleta    = get_post_meta( $post->ID, MSP_Comprobante::META_SERIE, true );
+		$serie_factura   = get_post_meta( $post->ID, MSP_Comprobante::META_SERIE_FACTURA, true );
 
 		// Por defecto una sede nueva está activa y vende en mostrador.
 		if ( '' === $activa && 'auto-draft' === $post->post_status ) {
@@ -174,6 +175,17 @@ class MSP_Sedes {
 		</p>
 
 		<p class="msp-field">
+			<label for="msp_serie_factura"><?php esc_html_e( 'Serie de factura electrónica', 'multisede-pos' ); ?></label>
+			<input type="text" id="msp_serie_factura" name="msp_serie_factura" class="widefat" maxlength="4"
+				style="text-transform:uppercase;max-width:120px"
+				value="<?php echo esc_attr( $serie_factura ); ?>"
+				placeholder="F001" />
+			<span style="display:block;color:#666;font-size:12px;margin-top:4px">
+				<?php esc_html_e( 'Empieza con "F" y 4 caracteres (ej. F001). Única por sede, y tampoco puede repetir una serie de boleta. Déjala vacía si esta tienda no emite facturas: sin ella, el sistema solo emitirá boletas.', 'multisede-pos' ); ?>
+			</span>
+		</p>
+
+		<p class="msp-field">
 			<label>
 				<input type="checkbox" name="msp_activa" value="1" <?php checked( $activa, '1' ); ?> />
 				<?php esc_html_e( 'Sede activa', 'multisede-pos' ); ?>
@@ -223,31 +235,44 @@ class MSP_Sedes {
 			);
 		}
 
-		// Serie de boleta electrónica: opcional, pero si se pone debe tener el
-		// formato de SUNAT y no chocar con la de otra sede.
-		$serie = isset( $_POST['msp_serie_boleta'] )
-			? strtoupper( sanitize_text_field( wp_unslash( $_POST['msp_serie_boleta'] ) ) )
-			: '';
+		// Series de boleta y de factura: opcionales, pero si se ponen deben
+		// tener el formato de SUNAT y no chocar con la de otra sede. El bucle
+		// evita dos bloques gemelos que luego se corrigen solo en uno.
+		foreach ( array( 'boleta', 'factura' ) as $tipo ) {
+			$campo = 'msp_serie_' . $tipo;
+			$meta  = MSP_Comprobante::dato_tipo( $tipo, 'meta' );
+			$letra = MSP_Comprobante::dato_tipo( $tipo, 'prefijo' );
+			$corto = mb_strtolower( MSP_Comprobante::dato_tipo( $tipo, 'corto' ) );
 
-		if ( '' === $serie ) {
-			delete_post_meta( $post_id, MSP_Comprobante::META_SERIE );
-		} elseif ( ! MSP_Comprobante::serie_valida( $serie ) ) {
-			set_transient(
-				'msp_sede_aviso_' . $post_id,
-				__( 'La serie de boleta no se guardó: debe empezar con "B" y tener 4 caracteres (ej. B001).', 'multisede-pos' ),
-				60
-			);
-			delete_post_meta( $post_id, MSP_Comprobante::META_SERIE );
-		} elseif ( MSP_Comprobante::serie_en_uso( $serie, $post_id ) ) {
-			set_transient(
-				'msp_sede_aviso_' . $post_id,
-				/* translators: %s: serie de boleta. */
-				sprintf( __( 'La serie %s ya la usa otra sede y no se guardó: cada tienda necesita una serie distinta.', 'multisede-pos' ), $serie ),
-				60
-			);
-			delete_post_meta( $post_id, MSP_Comprobante::META_SERIE );
-		} else {
-			update_post_meta( $post_id, MSP_Comprobante::META_SERIE, $serie );
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- El nonce lo valida guardar() antes de llamar aquí.
+			$serie = isset( $_POST[ $campo ] ) ? strtoupper( sanitize_text_field( wp_unslash( $_POST[ $campo ] ) ) ) : '';
+
+			if ( '' === $serie ) {
+				delete_post_meta( $post_id, $meta );
+			} elseif ( ! MSP_Comprobante::serie_valida( $serie, $tipo ) ) {
+				set_transient(
+					'msp_sede_aviso_' . $post_id,
+					sprintf(
+						/* translators: 1: tipo de comprobante, 2: letra inicial, 3: ejemplo de serie. */
+						__( 'La serie de %1$s no se guardó: debe empezar con "%2$s" y tener 4 caracteres (ej. %3$s).', 'multisede-pos' ),
+						$corto,
+						$letra,
+						$letra . '001'
+					),
+					60
+				);
+				delete_post_meta( $post_id, $meta );
+			} elseif ( MSP_Comprobante::serie_en_uso( $serie, $post_id ) ) {
+				set_transient(
+					'msp_sede_aviso_' . $post_id,
+					/* translators: %s: serie. */
+					sprintf( __( 'La serie %s ya la usa otra sede y no se guardó: cada tienda necesita una serie distinta.', 'multisede-pos' ), $serie ),
+					60
+				);
+				delete_post_meta( $post_id, $meta );
+			} else {
+				update_post_meta( $post_id, $meta, $serie );
+			}
 		}
 	}
 

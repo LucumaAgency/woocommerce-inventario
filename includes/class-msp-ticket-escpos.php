@@ -219,7 +219,12 @@ class MSP_Ticket_EscPos {
 
 		$t .= "\n";
 		$t .= self::ESC . 'E' . chr( 1 );
-		$t .= self::centrar( 'BOLETA DE VENTA ELECTRONICA', $cols );
+		// Sin tildes a propósito: el encabezado va en mayúsculas y algunas
+		// páginas de códigos no traen la Ó acentuada en versales.
+		$t .= self::centrar(
+			'factura' === MSP_Comprobante::tipo_valido( $c['tipo'] ) ? 'FACTURA ELECTRONICA' : 'BOLETA DE VENTA ELECTRONICA',
+			$cols
+		);
 		$t .= self::centrar( MSP_Comprobante::numero( $c ), $cols );
 		$t .= self::ESC . 'E' . chr( 0 );
 
@@ -239,7 +244,8 @@ class MSP_Ticket_EscPos {
 			}
 		}
 		if ( $c['cliente_num_doc'] ) {
-			$t .= self::lr( 'DNI', $c['cliente_num_doc'], $cols );
+			$etiqueta = 'factura' === MSP_Comprobante::tipo_valido( $c['tipo'] ) ? 'RUC' : 'DNI';
+			$t       .= self::lr( $etiqueta, $c['cliente_num_doc'], $cols );
 		}
 		$t .= $regla;
 
@@ -289,8 +295,9 @@ class MSP_Ticket_EscPos {
 			$salida .= self::ESC . 'a' . chr( 1 ) . self::qr( MSP_Ticket::cadena_qr( $c ) ) . "\n";
 		}
 
-		$pie  = self::centrar( 'Representacion impresa de la boleta', $cols );
-		$pie .= self::centrar( 'de venta electronica.', $cols );
+		$pie = 'factura' === MSP_Comprobante::tipo_valido( $c['tipo'] )
+			? self::centrar( 'Representacion impresa de la', $cols ) . self::centrar( 'factura electronica.', $cols )
+			: self::centrar( 'Representacion impresa de la boleta', $cols ) . self::centrar( 'de venta electronica.', $cols );
 		$pie .= self::centrar( 'Consultala en www.sunat.gob.pe', $cols );
 		if ( ! MSP_Emisor::es_produccion() ) {
 			$pie .= self::centrar( '*** DOCUMENTO DE PRUEBA ***', $cols );

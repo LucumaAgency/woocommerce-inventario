@@ -51,10 +51,14 @@ class MSP_Resumen {
 	 * @param string $fecha Fecha de emisión de los comprobantes (Y-m-d).
 	 * @return array|WP_Error Fila creada.
 	 */
-	public static function crear( $fecha ) {
+	public static function crear( $fecha, $ruc = '' ) {
 		global $wpdb;
 
 		$entorno = MSP_Comprobante::entorno_actual();
+		$ruc     = preg_replace( '/[^0-9]/', '', (string) $ruc );
+		if ( '' === $ruc ) {
+			$ruc = (string) MSP_Emisor::ajustes()['ruc'];
+		}
 		$tabla   = self::tabla();
 		$fecha   = gmdate( 'Y-m-d', strtotime( $fecha ) );
 
@@ -86,13 +90,14 @@ class MSP_Resumen {
 				$tabla,
 				array(
 					'entorno'          => $entorno,
+					'ruc'              => $ruc,
 					'identificador'    => $identificador,
 					'fecha_referencia' => $fecha,
 					'correlativo'      => $correlativo,
 					'estado'           => 'pendiente',
 					'creado_at'        => current_time( 'mysql' ),
 				),
-				array( '%s', '%s', '%s', '%d', '%s', '%s' )
+				array( '%s', '%s', '%s', '%s', '%d', '%s', '%s' )
 			);
 			$wpdb->suppress_errors( $suprimir );
 

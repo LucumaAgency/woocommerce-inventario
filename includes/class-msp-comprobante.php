@@ -176,9 +176,14 @@ class MSP_Comprobante {
 	 * Dos sedes no pueden compartir serie: se pisarían el correlativo. Se valida
 	 * al guardar la sede.
 	 *
+	 * Se juzga **dentro del mismo emisor**: dos empresas distintas pueden usar
+	 * la misma serie sin pisarse, porque la B100 del RUC A y la B100 del RUC B
+	 * son documentos distintos ante SUNAT. Lo que no puede repetirse es la serie
+	 * entre dos sedes que emiten con el mismo RUC.
+	 *
 	 * @param string $serie          Serie a comprobar.
 	 * @param int    $excluir_sede_id Sede que se está guardando (se ignora a sí misma).
-	 * @return bool True si la serie ya está en uso por otra sede.
+	 * @return bool True si la serie ya está en uso por otra sede del mismo emisor.
 	 */
 	public static function serie_en_uso( $serie, $excluir_sede_id = 0 ) {
 		$serie = strtoupper( trim( (string) $serie ) );
@@ -186,13 +191,15 @@ class MSP_Comprobante {
 			return false;
 		}
 
+		$ruc_propio = class_exists( 'MSP_Emisor' ) ? MSP_Emisor::ruc_de_sede( $excluir_sede_id ) : '';
+
 		// Se buscan las DOS metas, no solo la del tipo que se está guardando:
 		// una serie repetida entre una boleta y una factura de sedes distintas
 		// seguiría siendo dos documentos compartiendo numeración.
 		$args = array(
 			'post_type'      => MSP_Sedes::CPT,
 			'post_status'    => 'any',
-			'posts_per_page' => 1,
+			'posts_per_page' => 50,
 			'fields'         => 'ids',
 			'post__not_in'   => array( (int) $excluir_sede_id ),
 			'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Una sola sede, al guardar.
@@ -208,7 +215,22 @@ class MSP_Comprobante {
 			),
 		);
 
-		return ! empty( get_posts( $args ) );
+		$sedes = get_posts( $args );
+		if ( empty( $sedes ) ) {
+			return false;
+		}
+
+		// Choca solo si esa otra sede emite con el mismo RUC.
+		if ( class_exists( 'MSP_Emisor' ) && MSP_Emisor::multi_emisor() ) {
+			foreach ( $sedes as $otra ) {
+				if ( MSP_Emisor::ruc_de_sede( $otra ) === $ruc_propio ) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
@@ -216,8 +238,8 @@ class MSP_Comprobante {
 	 *
 	 * Estrategia optimista, igual que descontar_si_hay del stock: se calcula el
 	 * siguiente número y se intenta INSERTAR. El índice UNIQUE
-	 * (entorno, serie, correlativo) rechaza el duplicado si otro cajero se adelantó; en ese caso se reintenta con
-	 * el siguiente. Nunca se repite ni se salta un número, y nunca usamos
+	 * (entorno, ruc, serie, correlativo) rechaza el duplicado si otro cajero se
+	 * adelantó; en ese caso se reintenta con el siguiente. Nunca se repite ni se salta un número, y nunca usamos
 	 * SELECT MAX()+1 sin la red del índice único.
 	 *
 	 * @param array $datos {
@@ -275,12 +297,20 @@ class MSP_Comprobante {
 		$ahora   = current_time( 'mysql' );
 		$entorno = self::entorno_actual();
 
+		// Con qué RUC emite esta sede. Se guarda en la fila y no se deduce
+		// después: una sede puede cambiar de empresa, y un comprobante emitido
+		// tiene que seguir perteneciendo al emisor con el que salió.
+		$ruc = class_exists( 'MSP_Emisor' ) ? MSP_Emisor::ruc_de_sede( $sede_id ) : '';
+
 		for ( $intento = 0; $intento < self::MAX_REINTENTOS_RESERVA; $intento++ ) {
 			// Siguiente correlativo de ESTA serie EN ESTE ENTORNO (empieza en 1
 			// si no hay ninguno). Beta y producción no comparten numeración.
+			// El correlativo se cuenta por (emisor, serie, entorno): cada empresa
+			// lleva su propia numeración, aunque dos usaran la misma serie.
 			$max = (int) $wpdb->get_var(
 				$wpdb->prepare(
-					"SELECT MAX(correlativo) FROM {$tabla} WHERE serie = %s AND entorno = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					"SELECT MAX(correlativo) FROM {$tabla} WHERE ruc = %s AND serie = %s AND entorno = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$ruc,
 					$serie,
 					$entorno
 				)
@@ -295,6 +325,7 @@ class MSP_Comprobante {
 				array(
 					'pedido_id'        => isset( $datos['pedido_id'] ) ? (int) $datos['pedido_id'] : null,
 					'sede_id'          => $sede_id,
+					'ruc'              => $ruc,
 					'tipo'             => $tipo,
 					'entorno'          => $entorno,
 					'serie'            => $serie,
@@ -307,7 +338,7 @@ class MSP_Comprobante {
 					'estado'           => 'pendiente',
 					'emitido_at'       => $ahora,
 				),
-				array( '%d', '%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%f', '%f', '%s', '%s' )
+				array( '%d', '%d', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%f', '%f', '%s', '%s' )
 			);
 			$wpdb->suppress_errors( $suprimir );
 

@@ -219,11 +219,15 @@ class MSP_Baja {
 	}
 
 	/**
-	 * Agrupa las bajas pendientes por fecha de emisión y las envía.
+	 * Agrupa las bajas pendientes por emisor y fecha de emisión, y las envía.
 	 *
 	 * Se agrupan por la fecha de emisión de los comprobantes, no por la fecha en
 	 * que se anularon: el resumen diario informa de los comprobantes de un día
 	 * concreto, así que dos boletas de días distintos no caben en el mismo.
+	 *
+	 * Y **también por emisor**: un resumen lo firma una empresa y solo puede
+	 * informar de sus propios comprobantes. Mezclar dos RUC en el mismo
+	 * documento lo hace inválido entero.
 	 */
 	public static function agrupar_y_enviar( $motivo = '' ) {
 		unset( $motivo ); // Solo distingue el aviso inmediato del barrido periódico.
@@ -238,7 +242,7 @@ class MSP_Baja {
 
 		$pendientes = (array) $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT id, emitido_at FROM {$tabla}
+				"SELECT id, ruc, emitido_at FROM {$tabla}
 				 WHERE baja_estado = 'pendiente'
 				   AND entorno = %s
 				 ORDER BY emitido_at ASC
@@ -252,15 +256,17 @@ class MSP_Baja {
 			return;
 		}
 
-		// Agrupar por día de emisión.
-		$por_fecha = array();
+		// Agrupar por emisor y día de emisión.
+		$grupos = array();
 		foreach ( $pendientes as $p ) {
-			$fecha                 = gmdate( 'Y-m-d', strtotime( $p['emitido_at'] ) );
-			$por_fecha[ $fecha ][] = (int) $p['id'];
+			$fecha  = gmdate( 'Y-m-d', strtotime( $p['emitido_at'] ) );
+			$ruc    = (string) $p['ruc'];
+			$grupos[ $ruc . '|' . $fecha ][] = (int) $p['id'];
 		}
 
-		foreach ( $por_fecha as $fecha => $ids ) {
-			$resumen = MSP_Resumen::crear( $fecha );
+		foreach ( $grupos as $clave => $ids ) {
+			list( $ruc, $fecha ) = explode( '|', $clave, 2 );
+			$resumen             = MSP_Resumen::crear( $fecha, $ruc );
 			if ( is_wp_error( $resumen ) ) {
 				continue;
 			}

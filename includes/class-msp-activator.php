@@ -17,7 +17,7 @@ class MSP_Activator {
 	/**
 	 * Versión del esquema de base de datos.
 	 */
-	const DB_VERSION = '6';
+	const DB_VERSION = '7';
 
 	/**
 	 * Aplica el esquema si cambió desde la última vez.
@@ -109,6 +109,7 @@ class MSP_Activator {
 			cerrada_at DATETIME NULL DEFAULT NULL,
 			PRIMARY KEY  (id),
 			KEY sede_id (sede_id),
+			KEY ruc (ruc),
 			KEY cajero_id (cajero_id),
 			KEY estado (estado),
 			KEY es_practica (es_practica)
@@ -141,6 +142,7 @@ class MSP_Activator {
 			id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
 			pedido_id BIGINT(20) UNSIGNED NULL DEFAULT NULL,
 			sede_id BIGINT(20) UNSIGNED NOT NULL,
+			ruc VARCHAR(11) NOT NULL DEFAULT '',
 			tipo VARCHAR(20) NOT NULL DEFAULT 'boleta',
 			entorno VARCHAR(12) NOT NULL DEFAULT 'beta',
 			serie VARCHAR(4) NOT NULL,
@@ -165,9 +167,10 @@ class MSP_Activator {
 			emitido_at DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
 			enviado_at DATETIME NULL DEFAULT NULL,
 			PRIMARY KEY  (id),
-			UNIQUE KEY entorno_serie_correlativo (entorno, serie, correlativo),
+			UNIQUE KEY emisor_serie_correlativo (entorno, ruc, serie, correlativo),
 			KEY pedido_id (pedido_id),
 			KEY sede_id (sede_id),
+			KEY ruc (ruc),
 			KEY estado (estado),
 			KEY proximo_intento (proximo_intento),
 			KEY baja_estado (baja_estado)
@@ -180,6 +183,7 @@ class MSP_Activator {
 		$sql_resumenes = "CREATE TABLE {$prefix}msp_resumenes (
 			id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
 			entorno VARCHAR(12) NOT NULL DEFAULT 'beta',
+			ruc VARCHAR(11) NOT NULL DEFAULT '',
 			identificador VARCHAR(20) NOT NULL,
 			fecha_referencia DATE NOT NULL,
 			correlativo INT(11) UNSIGNED NOT NULL DEFAULT 1,
@@ -209,39 +213,80 @@ class MSP_Activator {
 	}
 
 	/**
-	 * Retira el índice único antiguo de comprobantes (serie, correlativo).
+	 * Pone al día el índice único de comprobantes.
+	 *
+	 * La clave ha crecido dos veces, y cada vez el índice anterior estorba:
+	 *
+	 * - `serie_correlativo` — el original. Mientras siguiera puesto, beta y
+	 *   producción no podrían compartir un número (v1.9.1).
+	 * - `entorno_serie_correlativo` — el de la v1.9.1. Impide que dos EMISORES
+	 *   distintos usen la misma serie, que es legítimo: la B100 del RUC A y la
+	 *   B100 del RUC B son documentos distintos ante SUNAT (v1.24.0).
 	 *
 	 * dbDelta sabe crear índices nuevos pero no borrar los que sobran, así que
-	 * el viejo hay que quitarlo a mano. Mientras siga puesto, beta y producción
-	 * no pueden compartir un número: justo lo que la v1.9.1 quiere permitir.
-	 *
-	 * Se hace después de dbDelta y comprobando que el índice nuevo exista: si
-	 * la creación hubiera fallado, quitar el viejo dejaría la tabla sin ninguna
-	 * red contra correlativos duplicados, que es el peor escenario posible.
+	 * los viejos hay que quitarlos a mano. Se hace después de dbDelta y solo si
+	 * el índice nuevo existe: si su creación hubiera fallado, quitar los
+	 * anteriores dejaría la tabla sin ninguna red contra correlativos
+	 * duplicados, que es el peor escenario posible.
 	 */
 	private static function migrar_indice_comprobantes() {
 		global $wpdb;
 
 		$tabla = $wpdb->prefix . 'msp_comprobantes';
 
+		// Las filas anteriores al multi-emisor no tienen RUC. Se rellenan con el
+		// emisor configurado, que hasta ahora era el único que podía emitirlas.
+		// Sin esto quedarían fuera de cualquier consulta por emisor: invisibles
+		// para el resumen de bajas y para el correlativo siguiente de su serie.
+		if ( class_exists( 'MSP_Emisor' ) ) {
+			$a = MSP_Emisor::ajustes();
+			if ( ! empty( $a['ruc'] ) && self::columna_existe( $tabla, 'ruc' ) ) {
+				$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+					$wpdb->prepare(
+						"UPDATE {$tabla} SET ruc = %s WHERE ruc = ''", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+						$a['ruc']
+					)
+				);
+			}
+		}
+
 		$existe_nuevo = $wpdb->get_var(
 			$wpdb->prepare(
 				"SHOW INDEX FROM {$tabla} WHERE Key_name = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				'entorno_serie_correlativo'
+				'emisor_serie_correlativo'
 			)
 		);
 		if ( ! $existe_nuevo ) {
 			return;
 		}
 
-		$existe_viejo = $wpdb->get_var(
+		foreach ( array( 'serie_correlativo', 'entorno_serie_correlativo' ) as $indice ) {
+			$existe = $wpdb->get_var(
+				$wpdb->prepare(
+					"SHOW INDEX FROM {$tabla} WHERE Key_name = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$indice
+				)
+			);
+			if ( $existe ) {
+				$wpdb->query( "ALTER TABLE {$tabla} DROP INDEX `" . esc_sql( $indice ) . "`" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery
+			}
+		}
+	}
+
+	/**
+	 * ¿Existe esa columna en la tabla?
+	 *
+	 * @param string $tabla   Tabla.
+	 * @param string $columna Columna.
+	 * @return bool
+	 */
+	private static function columna_existe( $tabla, $columna ) {
+		global $wpdb;
+		return (bool) $wpdb->get_var(
 			$wpdb->prepare(
-				"SHOW INDEX FROM {$tabla} WHERE Key_name = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				'serie_correlativo'
+				"SHOW COLUMNS FROM {$tabla} LIKE %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$columna
 			)
 		);
-		if ( $existe_viejo ) {
-			$wpdb->query( "ALTER TABLE {$tabla} DROP INDEX serie_correlativo" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery
-		}
 	}
 }

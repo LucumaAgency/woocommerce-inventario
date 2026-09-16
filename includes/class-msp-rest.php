@@ -129,9 +129,10 @@ class MSP_REST {
 	 *
 	 * @return WP_REST_Response
 	 */
-	public function probar_credenciales() {
-		$ajustes = MSP_Emisor::ajustes();
-		$res     = MSP_Emisor::probar_credenciales();
+	public function probar_credenciales( $request = null ) {
+		$ruc     = $request ? preg_replace( '/[^0-9]/', '', (string) $request->get_param( 'ruc' ) ) : '';
+		$ajustes = MSP_Emisor::ajustes_emisor( $ruc );
+		$res     = MSP_Emisor::probar_credenciales( $ruc );
 		$res['entorno']     = isset( $ajustes['entorno'] ) ? $ajustes['entorno'] : '';
 		$res['sol_usuario'] = isset( $ajustes['sol_usuario'] ) ? $ajustes['sol_usuario'] : '';
 		return rest_ensure_response( $res );
@@ -148,8 +149,13 @@ class MSP_REST {
 	 *
 	 * @return WP_REST_Response
 	 */
-	public function diagnostico() {
-		$ajustes = MSP_Emisor::ajustes();
+	public function diagnostico( $request = null ) {
+		// Con varias empresas, `?ruc=` diagnostica la que se pida; sin él, la
+		// principal. Cada una tiene su propio certificado y su propia fecha de
+		// vencimiento, y esa fecha es la que deja a una empresa sin poder
+		// emitir de un día para otro.
+		$pedido  = $request ? preg_replace( '/[^0-9]/', '', (string) $request->get_param( 'ruc' ) ) : '';
+		$ajustes = MSP_Emisor::ajustes_emisor( $pedido );
 		$ruc     = isset( $ajustes['ruc'] ) ? (string) $ajustes['ruc'] : '';
 		$sol     = isset( $ajustes['sol_usuario'] ) ? (string) $ajustes['sol_usuario'] : '';
 
@@ -157,7 +163,9 @@ class MSP_REST {
 			'entorno'              => isset( $ajustes['entorno'] ) ? $ajustes['entorno'] : '',
 			'es_produccion'        => MSP_Emisor::es_produccion(),
 			'msp_cert_path_const'  => defined( 'MSP_CERT_PATH' ) ? (string) MSP_CERT_PATH : null,
-			'ruta_usada'           => MSP_Emisor::ruta_certificado(),
+			'msp_cert_dir_const'   => defined( 'MSP_CERT_DIR' ) ? (string) MSP_CERT_DIR : null,
+			'emisores'             => array_keys( MSP_Emisor::emisores() ),
+			'ruta_usada'           => MSP_Emisor::ruta_certificado( $ruc ),
 			'ruc_emisor'           => $ruc,
 			'razon_social'         => isset( $ajustes['razon_social'] ) ? $ajustes['razon_social'] : '',
 			'sol_usuario'          => $sol,

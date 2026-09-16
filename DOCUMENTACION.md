@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.23.0
+- **Versión actual:** 1.24.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -375,6 +375,34 @@ Lo que SUNAT tiene es el XML; lo que el cliente se lleva es el papel. Se sirve p
 - Fuera de producción el ticket lleva impreso *«DOCUMENTO DE PRUEBA — SIN VALOR»*.
 - **El PDF lo hace el navegador.** La página está maquetada a 80 mm con `@page size: 80mm auto`; el navegador la manda a la térmica o la guarda como PDF. Meter una librería de PDF —o el binario descontinuado de wkhtmltopdf— sería cargar megas y una dependencia frágil para lo que el navegador ya hace bien.
 
+### Varias empresas emisoras en una instalación (v1.24.0)
+saraih va a operar un **segundo RUC** con sus tiendas en **esta misma web**, con el inventario por sede como hasta ahora. Eso descarta montar otra instalación: el emisor deja de ser una opción global y pasa a ser **un dato de la sede**.
+
+- **`MSP_Emisor::emisores()`** — el emisor **principal sigue siendo el de los ajustes de siempre**, así que una instalación de una sola empresa no nota ningún cambio y no hay que configurar nada nuevo. Los demás viven en la opción `msp_emisores`, indexados por RUC.
+- **`ruc_de_sede()`** — meta `_msp_emisor_ruc` de la sede; sin ella, el principal.
+- **`ajustes_emisor( $ruc )`** — devuelve los ajustes globales con los campos de empresa sustituidos. **Todo el motor sigue leyendo un único array**; lo único que cambia es de dónde salen unos campos. Por eso el cambio no se desparrama.
+- **`ajustes_de_comprobante( $c )`** — mira el **RUC guardado en la fila**, no la sede: una sede puede cambiar de empresa, y un comprobante emitido tiene que seguir imprimiéndose y consultándose con los datos con los que salió.
+
+**La numeración es por emisor.** El RUC entra en la clave única (`entorno, ruc, serie, correlativo`, **DB_VERSION 7**) y en el `MAX(correlativo)` de la reserva. Dos consecuencias:
+
+- **Dos empresas pueden usar la misma serie**: la B100 del RUC A y la B100 del RUC B son documentos distintos ante SUNAT, cada uno con su propia numeración.
+- **Dentro de una empresa, no.** `serie_en_uso()` ahora juzga la colisión **entre sedes del mismo emisor**: dos tiendas del mismo RUC compartiendo serie se pisarían el correlativo.
+
+La migración rellena el `ruc` de las filas anteriores con el emisor configurado (si no, quedarían fuera de toda consulta por emisor: invisibles para el resumen de bajas y para el correlativo siguiente de su serie) y retira **las dos generaciones** de índice único anterior.
+
+**Los certificados: un archivo por RUC, en una carpeta fuera del webroot.**
+```php
+define( 'MSP_CERT_DIR', dirname( __FILE__ ) . '/../private/certs-msp' );
+// dentro: 20526693320.pem, 10426013393.pem…
+```
+El plugin **compone el nombre desde el RUC**: no hay campo de ruta por sede que alguien pueda apuntar a otro archivo. Cruzar dos certificados parecidos y firmar con el de la otra empresa es el error que de verdad va a pasar, y **`certificado_es_de()` lo bloquea en claro** antes de enviar (comprobación local con `openssl_x509_parse`, sin llamar a nadie; en beta se salta, porque ahí el certificado de prueba de Greenter no pertenece a ningún RUC nuestro). `MSP_CERT_PATH` se mantiene y sigue mandando para el emisor principal: es como está montado saraih hoy.
+
+**El resumen diario de bajas se agrupa por emisor y fecha.** Un resumen lo firma una empresa y solo puede informar de sus propios comprobantes: mezclar dos RUC lo invalida entero. La tabla de resúmenes también lleva `ruc`.
+
+**Diagnóstico por empresa:** `GET /wp-json/msp/v1/diagnostico?ruc=…` y `probar-credenciales?ruc=…`. Con una sola empresa el vencimiento del certificado se lleva en la cabeza; con varias, no — y el día que caduca uno, esa empresa deja de emitir en seco, en mostrador y con clientes delante.
+
+> **Lo que NO cambia:** el hosting. El cliente decidió mantener el sistema donde está (`CHECKLIST-PENDIENTES.md` §F punto 5).
+
 ### MSP_Factura (factura electrónica en el canal web — v1.23.0)
 Una boleta se emite siempre; la **factura no**: exige **RUC y razón social del comprador**, y sin eso SUNAT la rechaza. Por eso el checkout tiene que preguntarlo **antes** de cobrar.
 
@@ -505,6 +533,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.9.0** | **Boletas Fase 3** — cola de emisión en segundo plano (Action Scheduler) con reintentos de espera creciente, alarma por correo a los 2 días, pantalla **Comprobantes** y captura de **DNI** en POS y checkout (obligatoria sobre S/ 700). Esquema **DB_VERSION 4** (`proximo_intento`, `alertado_at`) |
 | **1.22.0** | Impresión ESC/POS por RawBT (iMin Falcon 1) + ajustes de impresión |
 | **1.23.0** | **Facturas electrónicas en el canal web** — serie de factura por sede, captura de RUC y razón social en el checkout, tipo de documento en XML y QR |
+| **1.24.0** | **Varias empresas emisoras** — emisor por sede, numeración y certificados por RUC, resumen de bajas agrupado por emisor. **DB_VERSION 7** |
 
 ---
 

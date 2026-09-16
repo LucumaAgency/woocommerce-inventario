@@ -196,7 +196,7 @@ class MSP_Ticket_EscPos {
 
 		$aj        = self::ajustes();
 		$cols      = $aj['columnas'];
-		$a         = MSP_Emisor::ajustes();
+		$a         = MSP_Emisor::ajustes_de_comprobante( $c );
 		$sede      = get_post( (int) $c['sede_id'] );
 		$direccion = $sede ? get_post_meta( $sede->ID, '_msp_direccion', true ) : '';
 		$total     = (float) $c['total'];

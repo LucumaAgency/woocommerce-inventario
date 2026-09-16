@@ -82,6 +82,25 @@ class MSP_Facturacion {
 			update_option( self::opcion(), $nuevos );
 			$aviso = 'guardado';
 
+		} elseif ( 'guardar_emisor' === $accion ) {
+			$aviso = $this->guardar_emisor();
+
+		} elseif ( 'borrar_emisor' === $accion ) {
+			$ruc       = isset( $_POST['ruc_emisor'] ) ? preg_replace( '/[^0-9]/', '', wp_unslash( $_POST['ruc_emisor'] ) ) : '';
+			$emisores  = get_option( MSP_Emisor::OPCION_EMISORES, array() );
+			$en_uso    = $this->sedes_del_emisor( $ruc );
+			if ( $en_uso ) {
+				$aviso = sprintf(
+					/* translators: %d: número de sedes. */
+					__( '⚠️ No se borró: %d sede(s) todavía emiten con ese RUC. Cámbialas de empresa primero.', 'multisede-pos' ),
+					count( $en_uso )
+				);
+			} else {
+				unset( $emisores[ $ruc ] );
+				update_option( MSP_Emisor::OPCION_EMISORES, $emisores );
+				$aviso = __( 'Empresa emisora eliminada. Los comprobantes ya emitidos con ese RUC se conservan.', 'multisede-pos' );
+			}
+
 		} elseif ( 'credenciales' === $accion ) {
 			$r     = MSP_Emisor::probar_credenciales();
 			$aviso = ( $r['ok'] ? '✅ ' : '⚠️ ' ) . $r['mensaje'];
@@ -395,6 +414,112 @@ class MSP_Facturacion {
 				</table>
 
 				<?php submit_button( __( 'Guardar ajustes', 'multisede-pos' ) ); ?>
+			</form>
+
+			<hr>
+
+			<h2><?php esc_html_e( 'Otras empresas emisoras', 'multisede-pos' ); ?></h2>
+			<p class="description" style="max-width:44em">
+				<?php esc_html_e( 'Para operar varias empresas (RUC) en la misma instalación. Cada sede emite con la empresa que se le asigne, con su propia serie y su propio certificado. La empresa de arriba es la principal y no hace falta añadirla aquí.', 'multisede-pos' ); ?>
+				<br><strong><?php esc_html_e( 'Cada RUC necesita su propio certificado digital y su propio usuario SOL:', 'multisede-pos' ); ?></strong>
+				<?php esc_html_e( 'el certificado de una empresa no puede firmar los comprobantes de otra.', 'multisede-pos' ); ?>
+			</p>
+
+			<?php $otros = array_filter( MSP_Emisor::emisores(), function ( $e ) { return empty( $e['principal'] ); } ); ?>
+
+			<?php if ( $otros ) : ?>
+				<table class="widefat striped" style="max-width:60em;margin-bottom:1em">
+					<thead>
+						<tr>
+							<th><?php esc_html_e( 'RUC', 'multisede-pos' ); ?></th>
+							<th><?php esc_html_e( 'Razón social', 'multisede-pos' ); ?></th>
+							<th><?php esc_html_e( 'Usuario SOL', 'multisede-pos' ); ?></th>
+							<th><?php esc_html_e( 'Certificado', 'multisede-pos' ); ?></th>
+							<th><?php esc_html_e( 'Sedes', 'multisede-pos' ); ?></th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( $otros as $ruc => $e ) : ?>
+							<?php
+							$cert  = MSP_Emisor::ruta_certificado( $ruc );
+							$sedes = $this->sedes_del_emisor( $ruc );
+							?>
+							<tr>
+								<td><code><?php echo esc_html( $ruc ); ?></code></td>
+								<td><?php echo esc_html( $e['razon_social'] ); ?></td>
+								<td><?php echo esc_html( $e['sol_usuario'] ); ?></td>
+								<td>
+									<?php if ( $cert ) : ?>
+										<span style="color:#008a20">✅ <?php echo esc_html( basename( $cert ) ); ?></span>
+									<?php else : ?>
+										<span style="color:#b32d2e">⚠️ <?php esc_html_e( 'sin certificado', 'multisede-pos' ); ?></span>
+									<?php endif; ?>
+								</td>
+								<td><?php echo esc_html( count( $sedes ) ); ?></td>
+								<td>
+									<form method="post" onsubmit="return confirm('<?php esc_attr_e( '¿Eliminar esta empresa emisora?', 'multisede-pos' ); ?>')">
+										<?php wp_nonce_field( 'msp_facturacion', 'msp_fact_nonce' ); ?>
+										<input type="hidden" name="msp_fact_action" value="borrar_emisor" />
+										<input type="hidden" name="ruc_emisor" value="<?php echo esc_attr( $ruc ); ?>" />
+										<button type="submit" class="button-link-delete button-link"><?php esc_html_e( 'Eliminar', 'multisede-pos' ); ?></button>
+									</form>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			<?php endif; ?>
+
+			<form method="post">
+				<?php wp_nonce_field( 'msp_facturacion', 'msp_fact_nonce' ); ?>
+				<input type="hidden" name="msp_fact_action" value="guardar_emisor" />
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="ruc_emisor"><?php esc_html_e( 'RUC y razón social', 'multisede-pos' ); ?></label></th>
+						<td>
+							<input type="text" name="ruc_emisor" id="ruc_emisor" maxlength="11" placeholder="RUC" />
+							<input type="text" class="regular-text" name="emisor_razon_social" placeholder="<?php esc_attr_e( 'Razón social', 'multisede-pos' ); ?>" />
+							<p class="description"><?php esc_html_e( 'Si el RUC ya está en la lista, se actualizan sus datos.', 'multisede-pos' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Clave SOL', 'multisede-pos' ); ?></th>
+						<td>
+							<input type="text" name="emisor_sol_usuario" placeholder="<?php esc_attr_e( 'usuario secundario', 'multisede-pos' ); ?>" />
+							<input type="password" name="emisor_sol_clave" placeholder="<?php esc_attr_e( 'clave', 'multisede-pos' ); ?>" autocomplete="new-password" />
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Domicilio fiscal', 'multisede-pos' ); ?></th>
+						<td>
+							<input type="text" class="regular-text" name="emisor_direccion" placeholder="<?php esc_attr_e( 'Dirección', 'multisede-pos' ); ?>" /><br>
+							<input type="text" name="emisor_ubigeo" placeholder="<?php esc_attr_e( 'Ubigeo', 'multisede-pos' ); ?>" />
+							<input type="text" name="emisor_departamento" placeholder="<?php esc_attr_e( 'Departamento', 'multisede-pos' ); ?>" />
+							<input type="text" name="emisor_provincia" placeholder="<?php esc_attr_e( 'Provincia', 'multisede-pos' ); ?>" />
+							<input type="text" name="emisor_distrito" placeholder="<?php esc_attr_e( 'Distrito', 'multisede-pos' ); ?>" />
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Certificado', 'multisede-pos' ); ?></th>
+						<td>
+							<p class="description" style="max-width:44em">
+								<?php
+								printf(
+									/* translators: %s: nombre de la constante. */
+									esc_html__( 'El certificado NO se sube por aquí: es una clave privada de firma y en la base de datos viajaría en cada copia de seguridad. Define %s en wp-config.php apuntando a una carpeta fuera del webroot y deja dentro un archivo por empresa, nombrado con su RUC.', 'multisede-pos' ),
+									'<code>MSP_CERT_DIR</code>'
+								);
+								?>
+								<br><code>define( 'MSP_CERT_DIR', dirname( __FILE__ ) . '/../private/certs-msp' );</code>
+								<br><?php esc_html_e( 'Y dentro: 20526693320.pem, 10426013393.pem…', 'multisede-pos' ); ?>
+								<br><strong><?php esc_html_e( 'El plugin compone el nombre desde el RUC', 'multisede-pos' ); ?></strong>
+								<?php esc_html_e( 'a propósito: sin campo de ruta, nadie puede apuntar una sede al certificado de la otra empresa, que es el error que de verdad ocurre.', 'multisede-pos' ); ?>
+							</p>
+						</td>
+					</tr>
+				</table>
+				<?php submit_button( __( 'Guardar empresa emisora', 'multisede-pos' ), 'secondary' ); ?>
 			</form>
 
 			<hr>

@@ -81,7 +81,7 @@ class MSP_Ticket {
 	 * @return string
 	 */
 	public static function cadena_qr( $c ) {
-		$a = MSP_Emisor::ajustes();
+		$a = MSP_Emisor::ajustes_de_comprobante( $c );
 
 		return implode(
 			'|',
@@ -201,7 +201,10 @@ class MSP_Ticket {
 	 * @param array $c Fila del comprobante.
 	 */
 	private function render( $c ) {
-		$a        = MSP_Emisor::ajustes();
+		// Los datos de la empresa salen del emisor del comprobante, no de los
+		// ajustes globales: con dos empresas, el ticket tiene que decir cuál
+		// emitió esa venta.
+		$a        = MSP_Emisor::ajustes_de_comprobante( $c );
 		$sede     = get_post( (int) $c['sede_id'] );
 		$direccion = $sede ? get_post_meta( $sede->ID, '_msp_direccion', true ) : '';
 		$lineas   = $this->lineas( $c );

@@ -120,6 +120,8 @@ class MSP_Sedes {
 		$activa          = get_post_meta( $post->ID, '_msp_activa', true );
 		$serie_boleta    = get_post_meta( $post->ID, MSP_Comprobante::META_SERIE, true );
 		$serie_factura   = get_post_meta( $post->ID, MSP_Comprobante::META_SERIE_FACTURA, true );
+		$emisor_ruc      = get_post_meta( $post->ID, MSP_Emisor::META_EMISOR, true );
+		$emisores        = class_exists( 'MSP_Emisor' ) ? MSP_Emisor::emisores() : array();
 
 		// Por defecto una sede nueva está activa y vende en mostrador.
 		if ( '' === $activa && 'auto-draft' === $post->post_status ) {
@@ -162,6 +164,22 @@ class MSP_Sedes {
 				<?php esc_html_e( 'Es la tienda virtual (no es una tienda física)', 'multisede-pos' ); ?>
 			</label>
 		</p>
+
+		<?php if ( count( $emisores ) > 1 ) : ?>
+			<p class="msp-field">
+				<label for="msp_emisor_ruc"><?php esc_html_e( 'Empresa que emite', 'multisede-pos' ); ?></label>
+				<select id="msp_emisor_ruc" name="msp_emisor_ruc" class="widefat">
+					<?php foreach ( $emisores as $ruc => $datos ) : ?>
+						<option value="<?php echo esc_attr( $ruc ); ?>" <?php selected( $emisor_ruc ? $emisor_ruc : array_key_first( $emisores ), $ruc ); ?>>
+							<?php echo esc_html( $datos['razon_social'] . ' — ' . $ruc ); ?>
+						</option>
+					<?php endforeach; ?>
+				</select>
+				<span style="display:block;color:#666;font-size:12px;margin-top:4px">
+					<?php esc_html_e( 'Con qué RUC se emiten los comprobantes de esta tienda. Cámbialo solo antes de emitir el primero: los ya emitidos conservan la empresa con la que salieron.', 'multisede-pos' ); ?>
+				</span>
+			</p>
+		<?php endif; ?>
 
 		<p class="msp-field">
 			<label for="msp_serie_boleta"><?php esc_html_e( 'Serie de boleta electrónica', 'multisede-pos' ); ?></label>
@@ -233,6 +251,19 @@ class MSP_Sedes {
 				'_msp_' . $check,
 				isset( $_POST[ 'msp_' . $check ] ) ? '1' : '0'
 			);
+		}
+
+		// Empresa emisora de la sede. Solo se toca si el formulario la traía:
+		// en una instalación de un solo emisor el campo no existe y la sede
+		// sigue con el principal, sin meta que mantener.
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- El nonce lo valida guardar() antes de llamar aquí.
+		if ( isset( $_POST['msp_emisor_ruc'] ) ) {
+			$ruc_emisor = preg_replace( '/[^0-9]/', '', wp_unslash( $_POST['msp_emisor_ruc'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			if ( $ruc_emisor && isset( MSP_Emisor::emisores()[ $ruc_emisor ] ) ) {
+				update_post_meta( $post_id, MSP_Emisor::META_EMISOR, $ruc_emisor );
+			} else {
+				delete_post_meta( $post_id, MSP_Emisor::META_EMISOR );
+			}
 		}
 
 		// Series de boleta y de factura: opcionales, pero si se ponen deben

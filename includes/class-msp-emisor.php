@@ -23,6 +23,151 @@ class MSP_Emisor {
 	/** Carpeta de archivos dentro de uploads. */
 	const CARPETA = 'msp-comprobantes';
 
+	/** Opción con los emisores adicionales (multi-RUC). */
+	const OPCION_EMISORES = 'msp_emisores';
+
+	/** Meta de la sede que dice con qué RUC emite. */
+	const META_EMISOR = '_msp_emisor_ruc';
+
+	/**
+	 * Campos que pertenecen al emisor y no a la instalación.
+	 *
+	 * El entorno, la emisión automática y el simulador de fallos son globales:
+	 * valen para todo el sistema. Lo de esta lista cambia con cada empresa.
+	 */
+	const CAMPOS_EMISOR = array(
+		'ruc',
+		'razon_social',
+		'direccion',
+		'ubigeo',
+		'departamento',
+		'provincia',
+		'distrito',
+		'sol_usuario',
+		'sol_clave',
+		'cert_path',
+	);
+
+	/**
+	 * Todos los emisores, empezando por el principal.
+	 *
+	 * El principal es el de los ajustes de siempre: así una instalación con una
+	 * sola empresa no nota ningún cambio, y sigue funcionando sin configurar
+	 * nada nuevo. Los demás viven en su propia opción, indexados por RUC.
+	 *
+	 * @return array RUC => datos del emisor.
+	 */
+	public static function emisores() {
+		$principal = self::ajustes();
+		$lista     = array();
+
+		if ( ! empty( $principal['ruc'] ) ) {
+			$datos              = array();
+			foreach ( self::CAMPOS_EMISOR as $campo ) {
+				$datos[ $campo ] = isset( $principal[ $campo ] ) ? $principal[ $campo ] : '';
+			}
+			$datos['principal']        = true;
+			$lista[ $principal['ruc'] ] = $datos;
+		}
+
+		$extra = get_option( self::OPCION_EMISORES, array() );
+		if ( is_array( $extra ) ) {
+			foreach ( $extra as $ruc => $datos ) {
+				$ruc = preg_replace( '/[^0-9]/', '', (string) $ruc );
+				if ( 11 !== strlen( $ruc ) || isset( $lista[ $ruc ] ) ) {
+					continue;
+				}
+				$fila = array( 'principal' => false );
+				foreach ( self::CAMPOS_EMISOR as $campo ) {
+					$fila[ $campo ] = isset( $datos[ $campo ] ) ? $datos[ $campo ] : '';
+				}
+				$fila['ruc']   = $ruc;
+				$lista[ $ruc ] = $fila;
+			}
+		}
+
+		return $lista;
+	}
+
+	/**
+	 * ¿Hay más de un emisor configurado?
+	 *
+	 * Sirve para no enseñar selectores de empresa donde solo hay una.
+	 *
+	 * @return bool
+	 */
+	public static function multi_emisor() {
+		return count( self::emisores() ) > 1;
+	}
+
+	/**
+	 * RUC con el que emite una sede.
+	 *
+	 * Sin meta, o con una que ya no corresponde a ningún emisor, manda el
+	 * principal: es el comportamiento que tenían todas las sedes hasta ahora.
+	 *
+	 * @param int $sede_id Sede.
+	 * @return string RUC.
+	 */
+	public static function ruc_de_sede( $sede_id ) {
+		$emisores = self::emisores();
+		$ruc      = preg_replace( '/[^0-9]/', '', (string) get_post_meta( (int) $sede_id, self::META_EMISOR, true ) );
+
+		if ( $ruc && isset( $emisores[ $ruc ] ) ) {
+			return $ruc;
+		}
+
+		$principal = self::ajustes();
+		return (string) $principal['ruc'];
+	}
+
+	/**
+	 * Ajustes vistos desde un emisor concreto.
+	 *
+	 * Devuelve los ajustes globales con los campos de empresa sustituidos por
+	 * los del emisor pedido. Todo el motor sigue leyendo un único array, como
+	 * antes; lo único que cambia es de dónde salen unos cuantos campos.
+	 *
+	 * @param string $ruc RUC del emisor. Vacío = el principal.
+	 * @return array
+	 */
+	public static function ajustes_emisor( $ruc = '' ) {
+		$base = self::ajustes();
+		$ruc  = preg_replace( '/[^0-9]/', '', (string) $ruc );
+
+		if ( '' === $ruc || $ruc === $base['ruc'] ) {
+			return $base;
+		}
+
+		$emisores = self::emisores();
+		if ( ! isset( $emisores[ $ruc ] ) ) {
+			return $base;
+		}
+
+		foreach ( self::CAMPOS_EMISOR as $campo ) {
+			$base[ $campo ] = $emisores[ $ruc ][ $campo ];
+		}
+
+		return $base;
+	}
+
+	/**
+	 * Ajustes del emisor que corresponde a un comprobante.
+	 *
+	 * Se mira primero el RUC guardado en la fila y no la sede: una sede puede
+	 * cambiar de empresa, y un comprobante ya emitido tiene que seguir
+	 * imprimiéndose y consultándose con los datos con los que salió.
+	 *
+	 * @param array $c Fila del comprobante.
+	 * @return array
+	 */
+	public static function ajustes_de_comprobante( $c ) {
+		if ( ! empty( $c['ruc'] ) ) {
+			return self::ajustes_emisor( $c['ruc'] );
+		}
+		return self::ajustes_emisor( self::ruc_de_sede( isset( $c['sede_id'] ) ? $c['sede_id'] : 0 ) );
+	}
+
 	/**
 	 * Ajustes guardados, con sus valores por defecto.
 	 *
@@ -85,16 +230,35 @@ class MSP_Emisor {
 	 *
 	 * @return string Ruta, o cadena vacía si no hay ninguna utilizable.
 	 */
-	public static function ruta_certificado() {
-		if ( defined( 'MSP_CERT_PATH' ) && MSP_CERT_PATH && file_exists( MSP_CERT_PATH ) ) {
+	public static function ruta_certificado( $ruc = '' ) {
+		$a   = self::ajustes_emisor( $ruc );
+		$ruc = $a['ruc'];
+
+		// 1. Una carpeta fuera del webroot con un archivo por RUC, nombrado con
+		//    el RUC: `.../certs-msp/20526693320.pem`. El plugin COMPONE el
+		//    nombre, no hay campo por sede que alguien pueda apuntar a otro
+		//    archivo: cruzar dos certificados parecidos y firmar con el de la
+		//    otra empresa es el error que de verdad va a pasar.
+		if ( defined( 'MSP_CERT_DIR' ) && MSP_CERT_DIR && $ruc ) {
+			$ruta = rtrim( MSP_CERT_DIR, '/\\' ) . '/' . $ruc . '.pem';
+			if ( file_exists( $ruta ) ) {
+				return $ruta;
+			}
+		}
+
+		// 2. La constante de un solo archivo. Sigue mandando para el emisor
+		//    principal: es como está montado saraih hoy y no se toca.
+		if ( self::es_principal( $ruc ) && defined( 'MSP_CERT_PATH' ) && MSP_CERT_PATH && file_exists( MSP_CERT_PATH ) ) {
 			return MSP_CERT_PATH;
 		}
 
-		$a = self::ajustes();
-		if ( $a['cert_path'] && file_exists( $a['cert_path'] ) ) {
+		// 3. El ajuste guardado de ese emisor.
+		if ( ! empty( $a['cert_path'] ) && file_exists( $a['cert_path'] ) ) {
 			return $a['cert_path'];
 		}
 
+		// 4. Fuera de producción, el certificado de prueba de Greenter, que el
+		//    sandbox acepta para cualquier RUC.
 		if ( ! self::es_produccion() ) {
 			$prueba = MSP_PLUGIN_DIR . 'certs-prueba/certificado-prueba.pem';
 			if ( file_exists( $prueba ) ) {
@@ -103,6 +267,60 @@ class MSP_Emisor {
 		}
 
 		return '';
+	}
+
+	/**
+	 * ¿Es este el emisor principal (el de los ajustes de siempre)?
+	 *
+	 * @param string $ruc RUC.
+	 * @return bool
+	 */
+	public static function es_principal( $ruc ) {
+		$base = self::ajustes();
+		return '' === $ruc || $ruc === $base['ruc'];
+	}
+
+	/**
+	 * Comprueba que un certificado corresponda al RUC que dice emitir.
+	 *
+	 * Es el error que va a ocurrir con varias empresas: dos archivos parecidos,
+	 * alguien los cruza, y se firma con el certificado de la otra. **Bloquea la
+	 * emisión y lo dice en claro**, en vez de advertir por lo bajo: un
+	 * comprobante firmado por quien no es lo rechaza SUNAT, y averiguar por qué
+	 * cuesta una tarde.
+	 *
+	 * Todo local, con `openssl_x509_parse`: no se llama a nadie.
+	 *
+	 * @param string $contenido Contenido del PEM.
+	 * @param string $ruc       RUC que debería firmar.
+	 * @return true|WP_Error
+	 */
+	public static function certificado_es_de( $contenido, $ruc ) {
+		// En beta se usa el certificado de prueba compartido de Greenter, que no
+		// pertenece a ningún RUC nuestro: comprobarlo ahí solo daría un falso
+		// error. El sandbox tampoco valida esta correspondencia.
+		if ( ! self::es_produccion() || ! function_exists( 'openssl_x509_parse' ) ) {
+			return true;
+		}
+
+		$datos = openssl_x509_parse( $contenido );
+		if ( ! $datos ) {
+			return true; // Si no se puede leer, el fallo saldrá al firmar, con su propio mensaje.
+		}
+
+		$texto = wp_json_encode( $datos );
+		if ( $ruc && false === strpos( (string) $texto, $ruc ) ) {
+			return new WP_Error(
+				'msp_cert_de_otro_ruc',
+				sprintf(
+					/* translators: %s: RUC del emisor. */
+					__( 'El certificado digital no corresponde al RUC %s. Firmar con el certificado de otra empresa hace que SUNAT rechace el comprobante. Revisa qué archivo tiene cargado esta sede.', 'multisede-pos' ),
+					$ruc
+				)
+			);
+		}
+
+		return true;
 	}
 
 	/**
@@ -142,12 +360,12 @@ class MSP_Emisor {
 	 *
 	 * @return \Greenter\See|WP_Error
 	 */
-	public static function see() {
+	public static function see( $ruc = '' ) {
 		if ( ! function_exists( 'msp_facturacion_disponible' ) || ! msp_facturacion_disponible() ) {
 			return new WP_Error( 'msp_sin_greenter', __( 'El motor de facturación no está disponible: faltan las dependencias del plugin.', 'multisede-pos' ) );
 		}
 
-		$cert = self::ruta_certificado();
+		$cert = self::ruta_certificado( $ruc );
 		if ( ! $cert ) {
 			return new WP_Error( 'msp_sin_certificado', __( 'No hay certificado digital configurado.', 'multisede-pos' ) );
 		}
@@ -157,7 +375,16 @@ class MSP_Emisor {
 			return new WP_Error( 'msp_cert_ilegible', __( 'El certificado existe pero no se puede leer. Revisa permisos y propietario del archivo.', 'multisede-pos' ) );
 		}
 
-		$a   = self::ajustes();
+		$a = self::ajustes_emisor( $ruc );
+
+		// Que el certificado sea de quien dice ser. Con una sola empresa esto
+		// nunca falla; con dos es la comprobación que evita firmar con el
+		// certificado de la otra.
+		$corresponde = self::certificado_es_de( $contenido, $a['ruc'] );
+		if ( is_wp_error( $corresponde ) ) {
+			return $corresponde;
+		}
+
 		$see = new \Greenter\See();
 		$see->setCertificate( $contenido );
 		$see->setService(
@@ -192,7 +419,7 @@ class MSP_Emisor {
 	 *     @type string $mensaje Explicación para la pantalla.
 	 * }
 	 */
-	public static function probar_credenciales() {
+	public static function probar_credenciales( $ruc = '' ) {
 		if ( ! function_exists( 'msp_facturacion_disponible' ) || ! msp_facturacion_disponible() ) {
 			return array(
 				'ok'      => false,
@@ -200,7 +427,7 @@ class MSP_Emisor {
 			);
 		}
 
-		$a = self::ajustes();
+		$a = self::ajustes_emisor( $ruc );
 
 		if ( '' === trim( (string) $a['sol_usuario'] ) || '' === trim( (string) $a['sol_clave'] ) ) {
 			return array(
@@ -337,7 +564,9 @@ class MSP_Emisor {
 			return new WP_Error( 'msp_ya_aceptado', __( 'Ese comprobante ya fue aceptado por SUNAT.', 'multisede-pos' ) );
 		}
 
-		$see = self::see();
+		// La conexión se abre con el emisor del propio comprobante: su
+		// certificado y su usuario SOL, no los del principal.
+		$see = self::see( isset( $c['ruc'] ) ? $c['ruc'] : '' );
 		if ( is_wp_error( $see ) ) {
 			return self::anotar_fallo( $comprobante_id, $see );
 		}
@@ -459,7 +688,7 @@ class MSP_Emisor {
 			return new WP_Error( 'msp_resumen_cerrado', __( 'Ese resumen ya tiene respuesta de SUNAT.', 'multisede-pos' ) );
 		}
 
-		$see = self::see();
+		$see = self::see( isset( $r['ruc'] ) ? $r['ruc'] : '' );
 		if ( is_wp_error( $see ) ) {
 			return self::anotar_fallo_resumen( $resumen_id, $see );
 		}
@@ -525,7 +754,7 @@ class MSP_Emisor {
 			return new WP_Error( 'msp_sin_ticket', __( 'Ese resumen todavía no tiene ticket.', 'multisede-pos' ) );
 		}
 
-		$see = self::see();
+		$see = self::see( isset( $r['ruc'] ) ? $r['ruc'] : '' );
 		if ( is_wp_error( $see ) ) {
 			return self::anotar_fallo_resumen( $resumen_id, $see );
 		}
@@ -583,7 +812,7 @@ class MSP_Emisor {
 			return new WP_Error( 'msp_resumen_vacio', __( 'El resumen no tiene comprobantes que comunicar.', 'multisede-pos' ) );
 		}
 
-		$a       = self::ajustes();
+		$a       = self::ajustes_emisor( isset( $r['ruc'] ) ? $r['ruc'] : '' );
 		$empresa = ( new \Greenter\Model\Company\Company() )
 			->setRuc( $a['ruc'] )
 			->setRazonSocial( $a['razon_social'] );
@@ -594,7 +823,7 @@ class MSP_Emisor {
 			$igv   = round( (float) $c['igv'], 2 );
 
 			$detalles[] = ( new \Greenter\Model\Summary\SummaryDetail() )
-				->setTipoDoc( '03' )
+				->setTipoDoc( MSP_Comprobante::codigo_sunat( $c ) )
 				->setSerieNro( MSP_Comprobante::numero( $c ) )
 				->setEstado( '3' ) // 1 informar, 2 corregir, 3 ANULAR.
 				->setClienteTipo( $c['cliente_num_doc'] ? '1' : '0' )
@@ -703,11 +932,19 @@ class MSP_Emisor {
 			return $dir;
 		}
 
-		$a      = self::ajustes();
+		$a = self::ajustes_de_comprobante( $c );
 		// Mismo número que va dentro del XML y que muestra el panel: si el archivo
 		// se llamara "B001-5" y el documento dijera "B001-00000005", buscar un
-		// comprobante en la carpeta de conservación sería un acertijo.
-		$nombre = sprintf( '%s-03-%s-%08d', $a['ruc'], $c['serie'], (int) $c['correlativo'] );
+		// comprobante en la carpeta de conservación sería un acertijo. El tipo
+		// también es el real ('01' factura, '03' boleta): es el nombre que SUNAT
+		// espera y con el que el contador los cruza.
+		$nombre = sprintf(
+			'%s-%s-%s-%08d',
+			$a['ruc'],
+			MSP_Comprobante::codigo_sunat( $c ),
+			$c['serie'],
+			(int) $c['correlativo']
+		);
 		$rutas  = array( 'xml' => '', 'cdr' => '' );
 
 		$ruta_xml = $dir . '/' . $nombre . '.xml';
@@ -732,7 +969,7 @@ class MSP_Emisor {
 	 * @return \Greenter\Model\Sale\Invoice|WP_Error
 	 */
 	private static function armar( $c ) {
-		$a = self::ajustes();
+		$a = self::ajustes_de_comprobante( $c );
 
 		$direccion = ( new \Greenter\Model\Company\Address() )
 			->setUbigueo( $a['ubigeo'] ? $a['ubigeo'] : '150101' )

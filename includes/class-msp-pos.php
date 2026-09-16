@@ -132,6 +132,10 @@ class MSP_POS {
 					'falta_nombre'   => __( 'Falta el nombre del cliente.', 'multisede-pos' ),
 					'falta_dni'      => __( 'Falta el DNI del cliente.', 'multisede-pos' ),
 					'dni_corto'      => __( 'El DNI tiene 8 dígitos.', 'multisede-pos' ),
+					'falta_ruc'      => __( 'Para la factura hace falta el RUC del cliente.', 'multisede-pos' ),
+					'ruc_corto'      => __( 'El RUC tiene 11 dígitos.', 'multisede-pos' ),
+					'falta_razon'    => __( 'Falta la razón social del cliente.', 'multisede-pos' ),
+					'sede_sin_serie' => __( 'Esta tienda no tiene serie de factura configurada: solo puede emitir boletas.', 'multisede-pos' ),
 					'abrir_caja'     => __( '¿Con cuánto efectivo abres la caja? (0 si empiezas sin fondo)', 'multisede-pos' ),
 					'abriendo'       => __( 'Abriendo caja…', 'multisede-pos' ),
 				),
@@ -210,6 +214,25 @@ class MSP_POS {
 						</div>
 
 						<?php if ( MSP_Cola::activa() ) : ?>
+							<?php $sedes_factura = class_exists( 'MSP_Factura' ) ? MSP_Factura::sedes_con_factura() : array(); ?>
+
+							<?php if ( $sedes_factura ) : ?>
+								<?php
+								/* El cliente que pide factura lo dice ANTES de pagar, y el
+								   cajero tiene que poder cambiarlo con el ticket ya armado:
+								   por eso es un selector aquí y no una pantalla aparte. */
+								?>
+								<div id="msp-pos-comprobante">
+									<label for="msp-pos-tipo"><?php esc_html_e( 'Comprobante', 'multisede-pos' ); ?></label>
+									<select id="msp-pos-tipo"
+										data-sedes-factura="<?php echo esc_attr( wp_json_encode( array_keys( $sedes_factura ) ) ); ?>">
+										<option value="boleta"><?php esc_html_e( 'Boleta', 'multisede-pos' ); ?></option>
+										<option value="factura"><?php esc_html_e( 'Factura (con RUC)', 'multisede-pos' ); ?></option>
+									</select>
+									<p id="msp-pos-tipo-aviso" class="description"></p>
+								</div>
+							<?php endif; ?>
+
 							<div id="msp-pos-cliente">
 								<label for="msp-pos-dni"><?php esc_html_e( 'DNI del cliente', 'multisede-pos' ); ?></label>
 								<input type="text" id="msp-pos-dni" inputmode="numeric" maxlength="8" autocomplete="off"
@@ -218,6 +241,17 @@ class MSP_POS {
 									placeholder="<?php esc_attr_e( 'Nombre del cliente', 'multisede-pos' ); ?>" />
 								<p id="msp-pos-dni-aviso" class="description"></p>
 							</div>
+
+							<?php if ( $sedes_factura ) : ?>
+								<div id="msp-pos-factura" style="display:none">
+									<label for="msp-pos-ruc"><?php esc_html_e( 'RUC del cliente', 'multisede-pos' ); ?></label>
+									<input type="text" id="msp-pos-ruc" inputmode="numeric" maxlength="11" autocomplete="off"
+										placeholder="<?php esc_attr_e( '11 dígitos', 'multisede-pos' ); ?>" />
+									<input type="text" id="msp-pos-razon-social" autocomplete="off"
+										placeholder="<?php esc_attr_e( 'Razón social', 'multisede-pos' ); ?>" />
+									<p id="msp-pos-ruc-aviso" class="description"></p>
+								</div>
+							<?php endif; ?>
 						<?php endif; ?>
 
 						<button type="button" class="button button-primary button-hero" id="msp-pos-cobrar">
@@ -357,6 +391,38 @@ class MSP_POS {
 			wp_send_json_error( array( 'msg' => __( 'El DNI tiene 8 dígitos.', 'multisede-pos' ) ), 400 );
 		}
 
+		// Comprobante pedido por el cliente. Se valida entero ANTES de tocar
+		// stock o crear el pedido: si falta un dato, la venta no llega a
+		// existir y el cajero solo tiene que pedirlo, no anular nada.
+		$tipo   = isset( $_POST['tipo_comprobante'] ) ? sanitize_key( wp_unslash( $_POST['tipo_comprobante'] ) ) : 'boleta';
+		$tipo   = class_exists( 'MSP_Comprobante' ) ? MSP_Comprobante::tipo_valido( $tipo ) : 'boleta';
+		$ruc    = isset( $_POST['ruc'] ) ? preg_replace( '/[^0-9]/', '', wp_unslash( $_POST['ruc'] ) ) : '';
+		$razon  = isset( $_POST['razon_social'] ) ? sanitize_text_field( wp_unslash( $_POST['razon_social'] ) ) : '';
+
+		if ( 'factura' === $tipo ) {
+			if ( ! MSP_Comprobante::serie_valida( MSP_Comprobante::serie_de_sede( $sede_id, 'factura' ), 'factura' ) ) {
+				wp_send_json_error(
+					array( 'msg' => __( 'Esta tienda no tiene serie de factura configurada: solo puede emitir boletas.', 'multisede-pos' ) ),
+					400
+				);
+			}
+			if ( '' === $ruc ) {
+				wp_send_json_error( array( 'msg' => __( 'Para la factura hace falta el RUC del cliente.', 'multisede-pos' ), 'foco_ruc' => true ), 400 );
+			}
+			if ( ! class_exists( 'MSP_Factura' ) || ! MSP_Factura::ruc_valido( $ruc ) ) {
+				wp_send_json_error(
+					array(
+						'msg'      => __( 'Ese RUC no es válido: revisa que no falte o sobre un dígito.', 'multisede-pos' ),
+						'foco_ruc' => true,
+					),
+					400
+				);
+			}
+			if ( '' === trim( $razon ) ) {
+				wp_send_json_error( array( 'msg' => __( 'Falta la razón social del cliente.', 'multisede-pos' ), 'foco_ruc' => true ), 400 );
+			}
+		}
+
 		// Validar stock disponible (físico − reservado) en la sede.
 		$normalizados = array();
 		$total_previo = 0.0;
@@ -406,7 +472,7 @@ class MSP_POS {
 		// Se comprueba ANTES de descontar stock y crear el pedido: si falta el
 		// dato, la venta no llega a existir y el cajero solo tiene que pedirlo,
 		// no anular nada.
-		if ( MSP_Cola::activa() && round( $total_previo, 2 ) > MSP_Comprobante::LIMITE_DNI ) {
+		if ( MSP_Cola::activa() && 'factura' !== $tipo && round( $total_previo, 2 ) > MSP_Comprobante::LIMITE_DNI ) {
 			$faltan = array();
 			if ( '' === $dni ) {
 				$faltan[] = __( 'el DNI', 'multisede-pos' );
@@ -476,12 +542,21 @@ class MSP_POS {
 		$order->update_meta_data( '_msp_reserva_estado', 'recogido' );
 		$order->update_meta_data( '_msp_pos_metodo', $metodo );
 		$order->update_meta_data( '_msp_cajero_id', get_current_user_id() );
-		if ( $dni ) {
-			$order->update_meta_data( '_msp_cliente_tipo_doc', '1' ); // 1 = DNI en el catálogo 06 de SUNAT.
-			$order->update_meta_data( '_msp_cliente_num_doc', $dni );
-		}
-		if ( $cliente_nombre ) {
-			$order->update_meta_data( '_msp_cliente_nombre', $cliente_nombre );
+		if ( 'factura' === $tipo ) {
+			// En la factura el comprador es el RUC, no el DNI: si el cajero
+			// había puesto los dos, manda el de la factura.
+			$order->update_meta_data( '_msp_tipo_comprobante', 'factura' );
+			$order->update_meta_data( '_msp_cliente_tipo_doc', MSP_Comprobante::DOC_RUC );
+			$order->update_meta_data( '_msp_cliente_num_doc', $ruc );
+			$order->update_meta_data( '_msp_cliente_nombre', $razon );
+		} else {
+			if ( $dni ) {
+				$order->update_meta_data( '_msp_cliente_tipo_doc', '1' ); // 1 = DNI en el catálogo 06 de SUNAT.
+				$order->update_meta_data( '_msp_cliente_num_doc', $dni );
+			}
+			if ( $cliente_nombre ) {
+				$order->update_meta_data( '_msp_cliente_nombre', $cliente_nombre );
+			}
 		}
 		$order->update_meta_data( '_msp_stock_aplicado', '1' );
 		$order->calculate_totals();

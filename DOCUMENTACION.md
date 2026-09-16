@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.24.0
+- **Versión actual:** 1.25.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -375,6 +375,18 @@ Lo que SUNAT tiene es el XML; lo que el cliente se lleva es el papel. Se sirve p
 - Fuera de producción el ticket lleva impreso *«DOCUMENTO DE PRUEBA — SIN VALOR»*.
 - **El PDF lo hace el navegador.** La página está maquetada a 80 mm con `@page size: 80mm auto`; el navegador la manda a la térmica o la guarda como PDF. Meter una librería de PDF —o el binario descontinuado de wkhtmltopdf— sería cargar megas y una dependencia frágil para lo que el navegador ya hace bien.
 
+### Factura en el POS de mostrador (v1.25.0)
+El caso real: **el cliente llega a la tienda y pide factura**. Hacer que el cajero simule una compra web —dirección incluida— para eso no tiene sentido, así que la captura vive en el propio POS.
+
+- **Selector Boleta / Factura** junto al método de pago, con **RUC y razón social** que aparecen al elegir factura. Es un selector y no una pantalla aparte porque el cliente lo dice *antes* de pagar y el cajero tiene que poder cambiarlo con el ticket ya armado.
+- **Solo aparece si alguna sede tiene serie de factura**, y avisa al elegir —no al cobrar— si la tienda concreta no puede emitirlas.
+- **El RUC se valida en el navegador y en el servidor.** El navegador es comodidad: avisa mientras se teclea. El servidor es el que manda. Las dos comprobaciones son el mismo algoritmo, y hay una prueba cruzada de los dos para que no se separen: si divergen, el cajero ve un error donde no lo hay, o el fallo aparece al cobrar.
+- **Todo se valida antes de tocar stock o crear el pedido**, igual que el DNI: si falta un dato la venta no llega a existir y el cajero solo tiene que pedirlo, no anular nada.
+- **En factura el comprador va por RUC y el DNI se oculta.** El límite de S/ 700 que obliga a identificar al comprador no aplica: es una regla de las boletas, y en la factura ya va identificado.
+- **Tras cobrar, el selector vuelve a boleta.** Dejarlo en factura acabaría emitiendo la del siguiente cliente con el RUC del anterior.
+
+A partir de ahí no hay nada nuevo: el pedido se marca con `_msp_tipo_comprobante` y lo recoge la cola, con el mismo motor, el mismo ticket y la misma numeración por serie que las boletas.
+
 ### Varias empresas emisoras en una instalación (v1.24.0)
 saraih va a operar un **segundo RUC** con sus tiendas en **esta misma web**, con el inventario por sede como hasta ahora. Eso descarta montar otra instalación: el emisor deja de ser una opción global y pasa a ser **un dato de la sede**.
 
@@ -534,6 +546,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.22.0** | Impresión ESC/POS por RawBT (iMin Falcon 1) + ajustes de impresión |
 | **1.23.0** | **Facturas electrónicas en el canal web** — serie de factura por sede, captura de RUC y razón social en el checkout, tipo de documento en XML y QR |
 | **1.24.0** | **Varias empresas emisoras** — emisor por sede, numeración y certificados por RUC, resumen de bajas agrupado por emisor. **DB_VERSION 7** |
+| **1.25.0** | **Factura en el POS** — selector boleta/factura con RUC y razón social en mostrador |
 
 ---
 

@@ -163,11 +163,78 @@
 		return $.trim( $( '#msp-pos-cliente-nombre' ).val() || '' );
 	}
 
+	function esFactura() {
+		return 'factura' === ( $( '#msp-pos-tipo' ).val() || 'boleta' );
+	}
+
+	function rucValor() {
+		return ( $( '#msp-pos-ruc' ).val() || '' ).replace( /[^0-9]/g, '' );
+	}
+
+	function razonValor() {
+		return $.trim( $( '#msp-pos-razon-social' ).val() || '' );
+	}
+
+	// El dígito verificador del RUC, comprobado aquí para avisar mientras el
+	// cajero teclea. El servidor lo vuelve a comprobar: esto es comodidad, no
+	// seguridad.
+	function rucValido( ruc ) {
+		if ( ruc.length !== 11 ) { return false; }
+		if ( [ '10', '15', '17', '20' ].indexOf( ruc.slice( 0, 2 ) ) === -1 ) { return false; }
+		var pesos = [ 5, 4, 3, 2, 7, 6, 5, 4, 3, 2 ];
+		var suma = 0;
+		for ( var i = 0; i < 10; i++ ) { suma += parseInt( ruc[ i ], 10 ) * pesos[ i ]; }
+		var v = 11 - ( suma % 11 );
+		if ( v === 10 ) { v = 0; }
+		if ( v === 11 ) { v = 1; }
+		return parseInt( ruc[ 10 ], 10 ) === v;
+	}
+
+	function faltaFactura() {
+		if ( ! esFactura() ) { return ''; }
+		if ( ! rucValor() ) { return mspPOS.i18n.falta_ruc; }
+		if ( ! rucValido( rucValor() ) ) { return mspPOS.i18n.ruc_corto; }
+		if ( ! razonValor() ) { return mspPOS.i18n.falta_razon; }
+		return '';
+	}
+
+	// Muestra u oculta los campos de factura, y avisa si la tienda elegida no
+	// puede emitirlas: mejor saberlo al elegir que al cobrar.
+	function sincronizarTipo() {
+		var $sel = $( '#msp-pos-tipo' );
+		if ( ! $sel.length ) { return; }
+
+		var factura = esFactura();
+		$( '#msp-pos-factura' ).toggle( factura );
+		// En una factura el comprador va identificado por RUC: el DNI sobra.
+		$( '#msp-pos-cliente' ).toggle( ! factura );
+
+		var permitidas = $sel.data( 'sedes-factura' ) || [];
+		var sede = parseInt( $( '#msp-pos-sede' ).val(), 10 );
+		var puede = permitidas.indexOf( sede ) !== -1;
+
+		$( '#msp-pos-tipo-aviso' )
+			.text( factura && ! puede ? mspPOS.i18n.sede_sin_serie : '' )
+			.css( 'color', '#b32d2e' );
+
+		$( '#msp-pos-ruc-aviso' ).text( faltaFactura() ).css( 'color', '#b32d2e' );
+	}
+
+	$( '#msp-pos-tipo, #msp-pos-sede' ).on( 'change', sincronizarTipo );
+	$( '#msp-pos-ruc' ).on( 'input', function () {
+		this.value = this.value.replace( /[^0-9]/g, '' ).slice( 0, 11 );
+		sincronizarTipo();
+	} );
+	$( '#msp-pos-razon-social' ).on( 'input', sincronizarTipo );
+	sincronizarTipo();
+
 	// Por encima del límite hacen falta LAS DOS COSAS: documento y nombre. Una
 	// boleta de S/ 900 con DNI real a nombre de "CLIENTE VARIOS" es
 	// contradictoria, y así saldría impresa.
 	function faltaIdentificar() {
-		if ( ! mspPOS.boletas || totalTicket() <= mspPOS.limiteDni ) {
+		// La factura ya identifica al comprador con su RUC: el límite del DNI
+		// es una regla de las boletas.
+		if ( ! mspPOS.boletas || esFactura() || totalTicket() <= mspPOS.limiteDni ) {
 			return '';
 		}
 		if ( dniValor().length !== 8 && ! nombreValor() ) {
@@ -208,6 +275,12 @@
 			$msg.html( '<span class="err">' + mspPOS.i18n.dni_corto + '</span>' );
 			return;
 		}
+		var faltaF = faltaFactura();
+		if ( faltaF ) {
+			$msg.html( '<span class="err">' + faltaF + '</span>' );
+			$( rucValor().length === 11 ? '#msp-pos-razon-social' : '#msp-pos-ruc' ).trigger( 'focus' );
+			return;
+		}
 		var falta = faltaIdentificar();
 		if ( falta ) {
 			$msg.html( '<span class="err">' + falta + '</span>' );
@@ -239,6 +312,9 @@
 				metodo: $( '#msp-pos-metodo' ).val(),
 				dni: dni,
 				cliente_nombre: $( '#msp-pos-cliente-nombre' ).val() || '',
+				tipo_comprobante: esFactura() ? 'factura' : 'boleta',
+				ruc: rucValor(),
+				razon_social: razonValor(),
 				items: JSON.stringify( items )
 			}
 		).done( function ( resp ) {
@@ -276,6 +352,12 @@
 			$( '#msp-pos-dni' ).val( '' );
 			$( '#msp-pos-cliente-nombre' ).val( '' );
 			$( '#msp-pos-dni-aviso' ).text( '' );
+			// Volver a boleta: el siguiente cliente es otro, y dejar "factura"
+			// puesta acabaría en una factura con el RUC del anterior.
+			$( '#msp-pos-ruc' ).val( '' );
+			$( '#msp-pos-razon-social' ).val( '' );
+			$( '#msp-pos-tipo' ).val( 'boleta' );
+			sincronizarTipo();
 			$( '#msp-pos-buscar' ).val( '' );
 			$( '#msp-pos-resultados' ).empty();
 			return;

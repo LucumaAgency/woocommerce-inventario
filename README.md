@@ -28,6 +28,8 @@ Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas fís
 | + | Boletas electrónicas SUNAT (emisión, cola, anulación, ticket con QR) | ✅ Implementado |
 | + | Impresión ESC/POS por RawBT (terminales Android tipo iMin Falcon 1) | ✅ Implementado (v1.22.0) |
 | + | Facturas electrónicas en la web (RUC en el checkout) | ✅ Implementado (v1.23.0) · sin notas de crédito |
+| + | Facturas en el POS de mostrador | ✅ Implementado (v1.25.0) |
+| + | Varias empresas emisoras (multi-RUC) | ✅ Implementado (v1.24.0) |
 
 ### Compra por tienda
 

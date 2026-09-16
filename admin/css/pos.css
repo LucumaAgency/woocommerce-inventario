@@ -79,6 +79,23 @@
 .msp-pos-pago input {
 	max-width: 240px;
 }
+/* El bloque de factura, destacado para que el cajero vea de un vistazo que
+   esta venta no lleva boleta: es el error que se paga caro, porque una vez
+   emitida no hay vuelta atrás sin nota de crédito. */
+#msp-pos-factura {
+	border-left: 3px solid #1C8E80;
+	padding: 8px 0 8px 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+#msp-pos-factura label {
+	font-weight: 600;
+}
+#msp-pos-comprobante select {
+	font-weight: 600;
+}
+
 #msp-pos-vuelto {
 	font-weight: 600;
 	margin: 4px 0 0;

@@ -325,6 +325,8 @@ class MSP_REST {
 			'horario'         => get_post_meta( $id, '_msp_horario', true ),
 			'serie_boleta'    => get_post_meta( $id, '_msp_serie_boleta', true ),
 			'serie_factura'   => get_post_meta( $id, '_msp_serie_factura', true ),
+			'serie_nc_boleta'  => get_post_meta( $id, '_msp_serie_nc_boleta', true ),
+			'serie_nc_factura' => get_post_meta( $id, '_msp_serie_nc_factura', true ),
 			'emisor_ruc'      => class_exists( 'MSP_Emisor' ) ? MSP_Emisor::ruc_de_sede( $id ) : '',
 			'vende_web'       => '1' === get_post_meta( $id, '_msp_vende_web', true ),
 			'vende_mostrador' => '1' === get_post_meta( $id, '_msp_vende_mostrador', true ),
@@ -363,10 +365,12 @@ class MSP_REST {
 	 */
 	private function aplicar_meta_sede( $id, $req ) {
 		$texto = array(
-			'direccion'     => '_msp_direccion',
-			'horario'       => '_msp_horario',
-			'serie_boleta'  => '_msp_serie_boleta',
-			'serie_factura' => '_msp_serie_factura',
+			'direccion'        => '_msp_direccion',
+			'horario'          => '_msp_horario',
+			'serie_boleta'     => '_msp_serie_boleta',
+			'serie_factura'    => '_msp_serie_factura',
+			'serie_nc_boleta'  => '_msp_serie_nc_boleta',
+			'serie_nc_factura' => '_msp_serie_nc_factura',
 		);
 		foreach ( $texto as $param => $meta ) {
 			if ( null !== $req->get_param( $param ) ) {
@@ -413,7 +417,13 @@ class MSP_REST {
 			return new WP_Error( 'msp_falta_nombre', 'Falta el nombre de la sede.', array( 'status' => 400 ) );
 		}
 
-		foreach ( array( 'serie_boleta' => 'boleta', 'serie_factura' => 'factura' ) as $param => $tipo ) {
+		$series = array(
+			'serie_boleta'     => 'boleta',
+			'serie_factura'    => 'factura',
+			'serie_nc_boleta'  => 'nc_boleta',
+			'serie_nc_factura' => 'nc_factura',
+		);
+		foreach ( $series as $param => $tipo ) {
 			$serie = $req->get_param( $param );
 			if ( ! $serie ) {
 				continue;
@@ -489,7 +499,13 @@ class MSP_REST {
 			}
 		}
 
-		foreach ( array( 'serie_boleta' => 'boleta', 'serie_factura' => 'factura' ) as $param => $tipo ) {
+		$series = array(
+			'serie_boleta'     => 'boleta',
+			'serie_factura'    => 'factura',
+			'serie_nc_boleta'  => 'nc_boleta',
+			'serie_nc_factura' => 'nc_factura',
+		);
+		foreach ( $series as $param => $tipo ) {
 			$serie = $req->get_param( $param );
 			if ( ! $serie ) {
 				continue;

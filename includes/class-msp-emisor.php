@@ -969,6 +969,10 @@ class MSP_Emisor {
 	 * @return \Greenter\Model\Sale\Invoice|WP_Error
 	 */
 	private static function armar( $c ) {
+		if ( MSP_Comprobante::es_nota( $c ) ) {
+			return self::armar_nota_credito( $c );
+		}
+
 		$a = self::ajustes_de_comprobante( $c );
 
 		$direccion = ( new \Greenter\Model\Company\Address() )
@@ -1039,6 +1043,163 @@ class MSP_Emisor {
 						->setValue( self::monto_en_letras( $total ) ),
 				)
 			);
+	}
+
+	/**
+	 * Arma la nota de crédito (documento 07).
+	 *
+	 * Lo que la distingue de una factura o boleta: **apunta a otro documento**.
+	 * SUNAT necesita saber cuál corrige (su tipo y su número completo) y por
+	 * qué (código del catálogo 09). Sin esas tres cosas la rechaza.
+	 *
+	 * Los importes son los de lo que se devuelve, no los de la venta original:
+	 * en una devolución parcial la nota vale menos que el comprobante que
+	 * corrige.
+	 *
+	 * @param array $c Fila de la nota.
+	 * @return \Greenter\Model\Sale\Note|WP_Error
+	 */
+	private static function armar_nota_credito( $c ) {
+		$a = self::ajustes_de_comprobante( $c );
+
+		$afectado = MSP_Comprobante::obtener( (int) $c['doc_afectado_id'] );
+		if ( ! $afectado ) {
+			return new WP_Error(
+				'msp_nota_sin_afectado',
+				__( 'La nota de crédito no encuentra el comprobante que corrige.', 'multisede-pos' )
+			);
+		}
+
+		$direccion = ( new \Greenter\Model\Company\Address() )
+			->setUbigueo( $a['ubigeo'] ? $a['ubigeo'] : '150101' )
+			->setDepartamento( $a['departamento'] ? $a['departamento'] : 'LIMA' )
+			->setProvincia( $a['provincia'] ? $a['provincia'] : 'LIMA' )
+			->setDistrito( $a['distrito'] ? $a['distrito'] : 'LIMA' )
+			->setDireccion( $a['direccion'] ? $a['direccion'] : '-' )
+			->setCodLocal( self::codigo_local( $c['sede_id'] ) );
+
+		$empresa = ( new \Greenter\Model\Company\Company() )
+			->setRuc( $a['ruc'] )
+			->setRazonSocial( $a['razon_social'] )
+			->setAddress( $direccion );
+
+		$cliente = ( new \Greenter\Model\Client\Client() )
+			->setTipoDoc( $c['cliente_tipo_doc'] ? $c['cliente_tipo_doc'] : '0' )
+			->setNumDoc( $c['cliente_num_doc'] ? $c['cliente_num_doc'] : '-' )
+			->setRznSocial( $c['cliente_nombre'] ? $c['cliente_nombre'] : 'CLIENTE VARIOS' );
+
+		$lineas = self::lineas_nota( $c );
+		if ( is_wp_error( $lineas ) ) {
+			return $lineas;
+		}
+
+		$gravadas = 0;
+		$igv      = 0;
+		foreach ( $lineas as $l ) {
+			$gravadas += $l->getMtoValorVenta();
+			$igv      += $l->getIgv();
+		}
+		$gravadas = round( $gravadas, 2 );
+		$igv      = round( $igv, 2 );
+		$total    = round( $gravadas + $igv, 2 );
+
+		return ( new \Greenter\Model\Sale\Note() )
+			->setUblVersion( '2.1' )
+			->setTipoDoc( '07' )
+			->setSerie( $c['serie'] )
+			->setCorrelativo( sprintf( '%08d', (int) $c['correlativo'] ) )
+			->setFechaEmision( new DateTime( 'now', new DateTimeZone( wp_timezone_string() ) ) )
+			->setTipDocAfectado( MSP_Comprobante::codigo_sunat( $afectado ) )
+			->setNumDocfectado( MSP_Comprobante::numero( $afectado ) )
+			->setCodMotivo( $c['motivo'] ? $c['motivo'] : '06' )
+			->setDesMotivo( $c['motivo_texto'] ? $c['motivo_texto'] : __( 'Devolución', 'multisede-pos' ) )
+			->setTipoMoneda( 'PEN' )
+			->setCompany( $empresa )
+			->setClient( $cliente )
+			->setMtoOperGravadas( $gravadas )
+			->setMtoIGV( $igv )
+			->setTotalImpuestos( $igv )
+			->setValorVenta( $gravadas )
+			->setSubTotal( $total )
+			->setMtoImpVenta( $total )
+			->setDetails( $lineas )
+			->setLegends(
+				array(
+					( new \Greenter\Model\Sale\Legend() )
+						->setCode( '1000' )
+						->setValue( self::monto_en_letras( $total ) ),
+				)
+			);
+	}
+
+	/**
+	 * Líneas de una nota de crédito: solo lo que se devuelve.
+	 *
+	 * @param array $c Fila de la nota.
+	 * @return array|WP_Error
+	 */
+	private static function lineas_nota( $c ) {
+		$solicitud = self::solicitud_de_nota( (int) $c['id'] );
+		$pedido    = $c['pedido_id'] ? wc_get_order( (int) $c['pedido_id'] ) : null;
+
+		// Sin pedido o sin desglose, una sola línea por el importe total. Es el
+		// caso de la anulación completa y el de las emisiones sueltas.
+		if ( ! $pedido || ! $solicitud || empty( $solicitud['lineas'] ) ) {
+			return array( self::linea( 'DEVOLUCION', __( 'Devolución', 'multisede-pos' ), 1, round( (float) $c['total'], 2 ) ) );
+		}
+
+		$marcadas = json_decode( (string) $solicitud['lineas'], true );
+		if ( ! is_array( $marcadas ) || ! $marcadas ) {
+			return array( self::linea( 'DEVOLUCION', __( 'Devolución', 'multisede-pos' ), 1, round( (float) $c['total'], 2 ) ) );
+		}
+
+		$lineas = array();
+		foreach ( $marcadas as $item_id => $cantidad ) {
+			$item = $pedido->get_item( (int) $item_id );
+			if ( ! $item || (int) $cantidad < 1 ) {
+				continue;
+			}
+			$producto = $item->get_product();
+			$sku      = $producto ? $producto->get_sku() : '';
+			$unidades = max( 1, (int) $item->get_quantity() );
+			$unitario = ( (float) $item->get_total() + (float) $item->get_total_tax() ) / $unidades;
+
+			$lineas[] = self::linea(
+				$sku ? $sku : (string) $item->get_product_id(),
+				$item->get_name(),
+				(int) $cantidad,
+				round( $unitario * (int) $cantidad, 2 )
+			);
+		}
+
+		if ( ! $lineas ) {
+			return new WP_Error( 'msp_nota_sin_lineas', __( 'La nota de crédito no tiene líneas que declarar.', 'multisede-pos' ) );
+		}
+
+		return $lineas;
+	}
+
+	/**
+	 * Solicitud de la que nació una nota.
+	 *
+	 * @param int $comprobante_id ID del comprobante de la nota.
+	 * @return array|null
+	 */
+	private static function solicitud_de_nota( $comprobante_id ) {
+		global $wpdb;
+
+		if ( ! class_exists( 'MSP_Nota' ) ) {
+			return null;
+		}
+
+		$tabla = MSP_Nota::tabla();
+		return $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT * FROM {$tabla} WHERE nota_comprobante_id = %d LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				(int) $comprobante_id
+			),
+			ARRAY_A
+		);
 	}
 
 	/**

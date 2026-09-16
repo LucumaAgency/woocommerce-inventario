@@ -48,6 +48,10 @@ class MSP_Plugin {
 		$checkout_pe = new MSP_Checkout_PE();
 		$checkout_pe->init();
 
+		// Notas de crédito: el cajero las pide, el gerente las aprueba.
+		$notas = new MSP_Notas_Pantalla();
+		$notas->init();
+
 		// Factura electrónica en el checkout web (RUC y razón social).
 		$factura = new MSP_Factura();
 		$factura->init();

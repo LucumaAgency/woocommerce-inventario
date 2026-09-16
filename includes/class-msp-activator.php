@@ -17,7 +17,7 @@ class MSP_Activator {
 	/**
 	 * Versión del esquema de base de datos.
 	 */
-	const DB_VERSION = '7';
+	const DB_VERSION = '8';
 
 	/**
 	 * Aplica el esquema si cambió desde la última vez.
@@ -110,6 +110,7 @@ class MSP_Activator {
 			PRIMARY KEY  (id),
 			KEY sede_id (sede_id),
 			KEY ruc (ruc),
+			KEY doc_afectado_id (doc_afectado_id),
 			KEY cajero_id (cajero_id),
 			KEY estado (estado),
 			KEY es_practica (es_practica)
@@ -147,6 +148,9 @@ class MSP_Activator {
 			entorno VARCHAR(12) NOT NULL DEFAULT 'beta',
 			serie VARCHAR(4) NOT NULL,
 			correlativo INT(11) UNSIGNED NOT NULL,
+			doc_afectado_id BIGINT(20) UNSIGNED NULL DEFAULT NULL,
+			motivo VARCHAR(4) NOT NULL DEFAULT '',
+			motivo_texto VARCHAR(255) NOT NULL DEFAULT '',
 			cliente_tipo_doc VARCHAR(2) NOT NULL DEFAULT '0',
 			cliente_num_doc VARCHAR(20) NOT NULL DEFAULT '',
 			cliente_nombre VARCHAR(255) NOT NULL DEFAULT '',
@@ -171,6 +175,7 @@ class MSP_Activator {
 			KEY pedido_id (pedido_id),
 			KEY sede_id (sede_id),
 			KEY ruc (ruc),
+			KEY doc_afectado_id (doc_afectado_id),
 			KEY estado (estado),
 			KEY proximo_intento (proximo_intento),
 			KEY baja_estado (baja_estado)
@@ -206,8 +211,37 @@ class MSP_Activator {
 		dbDelta( $sql_stock );
 		dbDelta( $sql_caja_sesiones );
 		dbDelta( $sql_caja_movimientos );
+		// Solicitudes de nota de crédito. Van en su propia tabla y NO en
+		// msp_comprobantes a propósito: una solicitud es un trámite interno que
+		// puede rechazarse, y un comprobante es un documento fiscal con
+		// numeración. Mezclarlos obligaría a reservar un correlativo al pedirla
+		// y a quemarlo si el gerente dice que no.
+		$sql_notas = "CREATE TABLE {$prefix}msp_notas (
+			id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+			comprobante_id BIGINT(20) UNSIGNED NOT NULL,
+			pedido_id BIGINT(20) UNSIGNED NULL DEFAULT NULL,
+			sede_id BIGINT(20) UNSIGNED NOT NULL,
+			motivo VARCHAR(4) NOT NULL DEFAULT '',
+			detalle TEXT NULL DEFAULT NULL,
+			lineas LONGTEXT NULL DEFAULT NULL,
+			total DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+			devolver_stock TINYINT(1) NOT NULL DEFAULT 1,
+			estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+			solicitante_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+			solicitado_at DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00',
+			revisor_id BIGINT(20) UNSIGNED NULL DEFAULT NULL,
+			revisado_at DATETIME NULL DEFAULT NULL,
+			respuesta VARCHAR(255) NOT NULL DEFAULT '',
+			nota_comprobante_id BIGINT(20) UNSIGNED NULL DEFAULT NULL,
+			PRIMARY KEY  (id),
+			KEY comprobante_id (comprobante_id),
+			KEY sede_id (sede_id),
+			KEY estado (estado)
+		) {$charset_collate};";
+
 		dbDelta( $sql_comprobantes );
 		dbDelta( $sql_resumenes );
+		dbDelta( $sql_notas );
 
 		self::migrar_indice_comprobantes();
 	}

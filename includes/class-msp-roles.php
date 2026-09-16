@@ -19,7 +19,7 @@ class MSP_Roles {
 	 * siguiente carga del admin (las actualizaciones por Git Updater no
 	 * disparan el hook de activación).
 	 */
-	const ROLES_VERSION = '3';
+	const ROLES_VERSION = '4';
 
 	/**
 	 * Capacidades propias del plugin.
@@ -35,6 +35,8 @@ class MSP_Roles {
 			'msp_gestionar_caja',      // Abrir/cerrar caja, arqueo.
 			'msp_ver_reportes',        // Reportes por sede.
 			'msp_anular_ventas',       // Anular una venta del turno abierto.
+			'msp_solicitar_notas',     // Pedir una nota de crédito (cajero).
+			'msp_aprobar_notas',       // Aprobarla para que se emita (gerente).
 		);
 	}
 
@@ -112,6 +114,11 @@ class MSP_Roles {
 			'msp_gestionar_caja'  => true,
 			'msp_ver_reportes'    => true,
 			'msp_anular_ventas'   => true,
+			// El gerente puede pedirlas y aprobarlas, pero no las suyas: eso lo
+			// impide el código, no la capacidad. Con dos gerentes en la tienda
+			// el circuito sigue teniendo dos manos.
+			'msp_solicitar_notas' => true,
+			'msp_aprobar_notas'   => true,
 		);
 
 		// Cajero: POS y su caja. Ve el stock, no lo ajusta.
@@ -121,12 +128,16 @@ class MSP_Roles {
 		// gerente sin tocar nada más. Las salvaguardas están en el código: solo
 		// su turno abierto, con motivo obligatorio y con su nombre escrito en el
 		// pedido.
+		// La nota de crédito el cajero la PIDE, no la emite: mueve dinero y
+		// mercadería, y la aprueba un gerente. Es la misma preocupación que con
+		// las anulaciones, resuelta con dos manos en vez de con confianza.
 		$cajero = array(
-			'read'               => true,
-			'msp_ver_stock'      => true,
-			'msp_usar_pos'       => true,
-			'msp_gestionar_caja' => true,
-			'msp_anular_ventas'  => true,
+			'read'                => true,
+			'msp_ver_stock'       => true,
+			'msp_usar_pos'        => true,
+			'msp_gestionar_caja'  => true,
+			'msp_anular_ventas'   => true,
+			'msp_solicitar_notas' => true,
 		);
 
 		// add_role() no hace nada si el rol ya existe: para poder cambiar las

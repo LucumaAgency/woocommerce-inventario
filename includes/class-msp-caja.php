@@ -34,6 +34,10 @@ class MSP_Caja {
 		add_action( 'msp_pos_venta_creada', array( $this, 'registrar_venta_pos' ), 10, 3 );
 		// Devolver el efectivo si esa venta se anula.
 		add_action( 'msp_pos_venta_anulada', array( $this, 'revertir_venta_pos' ), 10, 2 );
+
+		// Una nota de crédito devuelve dinero al cliente: si la venta fue en
+		// efectivo, ese dinero sale del cajón y tiene que verse en el cuadre.
+		add_action( 'msp_nota_emitida', array( $this, 'egreso_por_nota' ), 10, 3 );
 	}
 
 	/* ---------------------------------------------------------------------
@@ -643,6 +647,62 @@ class MSP_Caja {
 	 * @param WC_Order $order   Pedido anulado.
 	 * @param int      $sede_id Sede.
 	 */
+	/**
+	 * Saca de la caja el efectivo que devuelve una nota de crédito.
+	 *
+	 * Solo si la venta se cobró en efectivo por el POS: una devolución de algo
+	 * pagado con tarjeta o por la web no toca el cajón, y meterla descuadraría
+	 * el cuadre del turno en sentido contrario.
+	 *
+	 * A diferencia de la anulación, aquí el importe puede ser PARCIAL: es el de
+	 * la nota, no el de la venta.
+	 *
+	 * @param array         $solicitud Solicitud de la nota.
+	 * @param array         $nota      Comprobante de la nota.
+	 * @param WC_Order|null $order     Pedido.
+	 */
+	public function egreso_por_nota( $solicitud, $nota, $order ) {
+		if ( ! $order || 'efectivo' !== $order->get_meta( '_msp_pos_metodo' ) ) {
+			return;
+		}
+
+		$monto = round( (float) $solicitud['total'], 2 );
+		if ( $monto <= 0 ) {
+			return;
+		}
+
+		$sede_id = (int) $solicitud['sede_id'];
+		$destino = self::sesion_abierta( $sede_id, get_current_user_id() );
+
+		if ( ! $destino ) {
+			// Sin caja abierta no se toca ningún arqueo: queda dicho en el
+			// pedido para registrarlo a mano, igual que en la anulación.
+			$order->add_order_note(
+				sprintf(
+					/* translators: 1: número de la nota, 2: importe. */
+					__( 'Nota de crédito %1$s emitida, pero no hay caja abierta donde registrar la salida de %2$s. Regístralo como egreso al abrir la próxima caja.', 'multisede-pos' ),
+					MSP_Comprobante::numero( $nota ),
+					wp_strip_all_tags( wc_price( $monto ) )
+				)
+			);
+			$order->save();
+			return;
+		}
+
+		self::agregar_movimiento(
+			$destino->id,
+			'egreso',
+			sprintf(
+				/* translators: 1: número de la nota, 2: número de pedido. */
+				__( 'Nota de crédito %1$s (pedido #%2$s)', 'multisede-pos' ),
+				MSP_Comprobante::numero( $nota ),
+				$order->get_order_number()
+			),
+			$monto,
+			$order->get_id()
+		);
+	}
+
 	public function revertir_venta_pos( $order, $sede_id ) {
 		if ( 'efectivo' !== $order->get_meta( '_msp_pos_metodo' ) ) {
 			return;

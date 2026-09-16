@@ -29,6 +29,29 @@ class MSP_Comprobante {
 	 */
 	const META_SERIE_FACTURA = '_msp_serie_factura';
 
+	/** Meta de la serie de notas de crédito que corrigen BOLETAS (ej. BC00). */
+	const META_SERIE_NC_BOLETA = '_msp_serie_nc_boleta';
+
+	/** Meta de la serie de notas de crédito que corrigen FACTURAS (ej. FC00). */
+	const META_SERIE_NC_FACTURA = '_msp_serie_nc_factura';
+
+	/**
+	 * Motivos de nota de crédito (catálogo 09 de SUNAT).
+	 *
+	 * Tres de los diez que existen. Cada opción de más es una pantalla más
+	 * confusa para quien la usa con clientes esperando, y las otras siete no
+	 * aparecen en una tienda de ropa.
+	 *
+	 * @return array código => etiqueta.
+	 */
+	public static function motivos_nota() {
+		return array(
+			'01' => __( 'Anulación de la operación', 'multisede-pos' ),
+			'02' => __( 'Anulación por error en el RUC', 'multisede-pos' ),
+			'06' => __( 'Devolución total o parcial', 'multisede-pos' ),
+		);
+	}
+
 	/**
 	 * Tipo de documento de identidad de SUNAT para el RUC (catálogo 06).
 	 *
@@ -64,6 +87,24 @@ class MSP_Comprobante {
 				'etiqueta'  => __( 'Factura electrónica', 'multisede-pos' ),
 				'corto'     => __( 'Factura', 'multisede-pos' ),
 			),
+			// Las notas de crédito son un solo documento ante SUNAT (código 07),
+			// pero llevan DOS series según a quién corrijan: la serie hereda la
+			// letra del documento afectado (B para boletas, F para facturas).
+			// Por eso aquí son dos tipos y no uno.
+			'nc_boleta'  => array(
+				'codigo'    => '07',
+				'prefijo'   => 'B',
+				'meta'      => self::META_SERIE_NC_BOLETA,
+				'etiqueta'  => __( 'Nota de crédito electrónica', 'multisede-pos' ),
+				'corto'     => __( 'Nota de crédito', 'multisede-pos' ),
+			),
+			'nc_factura' => array(
+				'codigo'    => '07',
+				'prefijo'   => 'F',
+				'meta'      => self::META_SERIE_NC_FACTURA,
+				'etiqueta'  => __( 'Nota de crédito electrónica', 'multisede-pos' ),
+				'corto'     => __( 'Nota de crédito', 'multisede-pos' ),
+			),
 		);
 	}
 
@@ -94,7 +135,33 @@ class MSP_Comprobante {
 	}
 
 	/**
-	 * Código de SUNAT del comprobante (catálogo 01): '03' boleta, '01' factura.
+	 * ¿Es este comprobante una nota de crédito?
+	 *
+	 * @param array|string $comprobante Fila o tipo.
+	 * @return bool
+	 */
+	public static function es_nota( $comprobante ) {
+		$tipo = is_array( $comprobante )
+			? ( isset( $comprobante['tipo'] ) ? $comprobante['tipo'] : 'boleta' )
+			: $comprobante;
+		return in_array( self::tipo_valido( $tipo ), array( 'nc_boleta', 'nc_factura' ), true );
+	}
+
+	/**
+	 * Tipo de nota que corresponde a un comprobante.
+	 *
+	 * @param array $c Comprobante que se va a corregir.
+	 * @return string 'nc_boleta' o 'nc_factura'.
+	 */
+	public static function tipo_nota_para( $c ) {
+		return 'factura' === self::tipo_valido( isset( $c['tipo'] ) ? $c['tipo'] : 'boleta' )
+			? 'nc_factura'
+			: 'nc_boleta';
+	}
+
+	/**
+	 * Código de SUNAT del comprobante (catálogo 01): '03' boleta, '01' factura,
+	 * '07' nota de crédito.
 	 *
 	 * @param array|string $comprobante Fila del comprobante, o el tipo suelto.
 	 * @return string
@@ -282,13 +349,13 @@ class MSP_Comprobante {
 		// Una factura sin RUC y razón social del comprador la rechaza SUNAT.
 		// Mejor pararla aquí, antes de gastar un correlativo que luego habría
 		// que dejar anulado, que descubrirlo en la respuesta del envío.
-		if ( 'factura' === $tipo ) {
+		if ( in_array( $tipo, array( 'factura', 'nc_factura' ), true ) ) {
 			$num_doc = isset( $datos['cliente_num_doc'] ) ? preg_replace( '/[^0-9]/', '', (string) $datos['cliente_num_doc'] ) : '';
 			$nombre  = isset( $datos['cliente_nombre'] ) ? trim( (string) $datos['cliente_nombre'] ) : '';
 			if ( 11 !== strlen( $num_doc ) || '' === $nombre ) {
 				return new WP_Error(
 					'msp_factura_sin_comprador',
-					__( 'Una factura necesita el RUC (11 dígitos) y la razón social del cliente.', 'multisede-pos' )
+					__( 'Una factura (y su nota de crédito) necesita el RUC de 11 dígitos y la razón social del cliente.', 'multisede-pos' )
 				);
 			}
 		}
@@ -327,6 +394,9 @@ class MSP_Comprobante {
 					'sede_id'          => $sede_id,
 					'ruc'              => $ruc,
 					'tipo'             => $tipo,
+					'doc_afectado_id'  => isset( $datos['doc_afectado_id'] ) ? (int) $datos['doc_afectado_id'] : null,
+					'motivo'           => isset( $datos['motivo'] ) ? substr( sanitize_text_field( $datos['motivo'] ), 0, 4 ) : '',
+					'motivo_texto'     => isset( $datos['motivo_texto'] ) ? substr( sanitize_text_field( $datos['motivo_texto'] ), 0, 255 ) : '',
 					'entorno'          => $entorno,
 					'serie'            => $serie,
 					'correlativo'      => $siguiente,
@@ -338,7 +408,7 @@ class MSP_Comprobante {
 					'estado'           => 'pendiente',
 					'emitido_at'       => $ahora,
 				),
-				array( '%d', '%d', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%f', '%f', '%s', '%s' )
+				array( '%d', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%f', '%f', '%s', '%s' )
 			);
 			$wpdb->suppress_errors( $suprimir );
 

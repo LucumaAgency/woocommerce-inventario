@@ -437,6 +437,18 @@ class MSP_Comprobantes {
 										<?php esc_html_e( 'Ticket', 'multisede-pos' ); ?>
 									</a>
 								<?php endif; ?>
+								<?php
+								// La devolución se pide desde la venta, que es donde el
+								// cajero la está mirando. No sobre una nota ya emitida.
+								if ( 'aceptado' === $c['estado']
+									&& ! MSP_Comprobante::es_nota( $c )
+									&& current_user_can( MSP_Nota::CAP_SOLICITAR ) ) :
+									?>
+									<a class="button button-small"
+										href="<?php echo esc_url( MSP_Notas_Pantalla::url( array( 'comprobante' => $c['id'] ) ) ); ?>">
+										<?php esc_html_e( 'Nota de crédito', 'multisede-pos' ); ?>
+									</a>
+								<?php endif; ?>
 								<?php if ( $c['xml_path'] ) : ?>
 									<a class="button button-small" href="<?php echo esc_url( $this->url_accion( 'descargar', $c['id'], array( 'tipo' => 'xml' ) ) ); ?>">XML</a>
 								<?php endif; ?>

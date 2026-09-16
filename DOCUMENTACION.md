@@ -3,7 +3,7 @@
 Plugin de WordPress que extiende **WooCommerce** para operar varias tiendas físicas + la tienda virtual: inventario por sede, recojo en tienda, punto de venta de mostrador y caja chica.
 
 - **Repositorio:** `LucumaAgency/woocommerce-inventario`
-- **Versión actual:** 1.25.0
+- **Versión actual:** 1.26.0
 - **Despliegue:** GitHub → WordPress vía Git Updater
 - **Requisitos:** WordPress 6.0+, PHP 7.4+, WooCommerce 7.0+
 
@@ -375,6 +375,34 @@ Lo que SUNAT tiene es el XML; lo que el cliente se lleva es el papel. Se sirve p
 - Fuera de producción el ticket lleva impreso *«DOCUMENTO DE PRUEBA — SIN VALOR»*.
 - **El PDF lo hace el navegador.** La página está maquetada a 80 mm con `@page size: 80mm auto`; el navegador la manda a la térmica o la guarda como PDF. Meter una librería de PDF —o el binario descontinuado de wkhtmltopdf— sería cargar megas y una dependencia frágil para lo que el navegador ya hace bien.
 
+### Notas de crédito, con aprobación del gerente (v1.26.0)
+La nota de crédito (`07`) es lo que la comunicación de baja no puede hacer: revertir **parte** de una venta, corregir un RUC mal escrito, o anular pasado el plazo de 7 días. Y hace falta sobre todo en **boletas**, que es donde está casi toda la venta de la tienda: hasta ahora una devolución parcial de una boleta **no tenía ninguna solución dentro del sistema** (deuda D4).
+
+**El circuito tiene dos manos, por decisión del cliente:**
+
+```
+cajero SOLICITA  →  gerente APRUEBA  →  se emite a SUNAT
+```
+
+- **La solicitud NO reserva correlativo.** El número se toma al aprobar. Si se reservara al pedirla, cada solicitud rechazada dejaría un hueco en la serie, y SUNAT exige numeración sin huecos. Por eso las solicitudes viven en su propia tabla (`msp_notas`) y no en la de comprobantes: una es un trámite interno que puede rechazarse, la otra es un documento fiscal.
+- **Quien pide no aprueba.** Un gerente puede pedir y aprobar, pero no *su propia* solicitud: con dos gerentes en la tienda el circuito mantiene las dos manos. Lo impide el código, no la capacidad.
+- Capacidades separadas: `msp_solicitar_notas` (cajero) y `msp_aprobar_notas` (gerente). **ROLES_VERSION 4.**
+- **El stock y el dinero se mueven al aprobar**, no al pedir: hasta ese momento no ha pasado nada real.
+
+**Dos series por sede, no una.** La serie de una nota **hereda la letra del documento que corrige**: `BC00` para las que corrigen boletas, `FC00` para las de facturas. Por eso en el mapa de tipos son dos entradas (`nc_boleta`, `nc_factura`) aunque ante SUNAT sean el mismo documento `07`.
+
+**Tres motivos del catálogo 09, no los diez:** anulación de la operación, anulación por error en el RUC, y devolución total o parcial. Cada opción de más es una pantalla más confusa para quien la usa con clientes esperando.
+
+**Detalles que evitan declarar mal:**
+
+- **El IGV de la nota es proporcional al del comprobante original**, no `total/1.18`. Con todo gravado da lo mismo; con algo exonerado, el cálculo a secas declararía un IGV que nunca se cobró.
+- **No se puede devolver más de lo cobrado**: se suma lo ya acreditado antes de aceptar una nueva.
+- **Solo sobre comprobantes que SUNAT aceptó**, y nunca sobre otra nota.
+- **La casilla «la mercadería vuelve al stock» está marcada por defecto, pero es del cajero.** Lo normal es que la prenda se revenda; puede volver dañada, y eso solo lo ve quien la tiene delante.
+- **La caja registra la salida de efectivo** solo si la venta se cobró en efectivo por el POS, y por el importe de la nota, que puede ser parcial. Una devolución de algo pagado con tarjeta no toca el cajón.
+
+> **Lo que sigue faltando:** la **comunicación de baja (`RA`)** para anular una factura entera dentro de los 7 días. Con las notas de crédito, ese caso ya tiene salida (una nota por el total), así que deja de ser urgente.
+
 ### Factura en el POS de mostrador (v1.25.0)
 El caso real: **el cliente llega a la tienda y pide factura**. Hacer que el cajero simule una compra web —dirección incluida— para eso no tiene sentido, así que la captura vive en el propio POS.
 
@@ -547,6 +575,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.23.0** | **Facturas electrónicas en el canal web** — serie de factura por sede, captura de RUC y razón social en el checkout, tipo de documento en XML y QR |
 | **1.24.0** | **Varias empresas emisoras** — emisor por sede, numeración y certificados por RUC, resumen de bajas agrupado por emisor. **DB_VERSION 7** |
 | **1.25.0** | **Factura en el POS** — selector boleta/factura con RUC y razón social en mostrador |
+| **1.26.0** | **Notas de crédito** — devoluciones totales y parciales, con aprobación del gerente. **DB_VERSION 8**, **ROLES_VERSION 4** |
 
 ---
 

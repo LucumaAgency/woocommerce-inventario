@@ -121,6 +121,8 @@ class MSP_Sedes {
 		$serie_boleta    = get_post_meta( $post->ID, MSP_Comprobante::META_SERIE, true );
 		$serie_factura   = get_post_meta( $post->ID, MSP_Comprobante::META_SERIE_FACTURA, true );
 		$emisor_ruc      = get_post_meta( $post->ID, MSP_Emisor::META_EMISOR, true );
+		$serie_nc_boleta  = get_post_meta( $post->ID, MSP_Comprobante::META_SERIE_NC_BOLETA, true );
+		$serie_nc_factura = get_post_meta( $post->ID, MSP_Comprobante::META_SERIE_NC_FACTURA, true );
 		$emisores        = class_exists( 'MSP_Emisor' ) ? MSP_Emisor::emisores() : array();
 
 		// Por defecto una sede nueva está activa y vende en mostrador.
@@ -204,6 +206,19 @@ class MSP_Sedes {
 		</p>
 
 		<p class="msp-field">
+			<label for="msp_serie_nc_boleta"><?php esc_html_e( 'Series de nota de crédito', 'multisede-pos' ); ?></label>
+			<input type="text" id="msp_serie_nc_boleta" name="msp_serie_nc_boleta" maxlength="4"
+				style="text-transform:uppercase;max-width:120px"
+				value="<?php echo esc_attr( $serie_nc_boleta ); ?>" placeholder="BC00" />
+			<input type="text" id="msp_serie_nc_factura" name="msp_serie_nc_factura" maxlength="4"
+				style="text-transform:uppercase;max-width:120px"
+				value="<?php echo esc_attr( $serie_nc_factura ); ?>" placeholder="FC00" />
+			<span style="display:block;color:#666;font-size:12px;margin-top:4px">
+				<?php esc_html_e( 'Son DOS: la nota hereda la letra del documento que corrige, así que la de boletas empieza con "B" (ej. BC00) y la de facturas con "F" (ej. FC00). Sin ellas, esa tienda no puede hacer devoluciones.', 'multisede-pos' ); ?>
+			</span>
+		</p>
+
+		<p class="msp-field">
 			<label>
 				<input type="checkbox" name="msp_activa" value="1" <?php checked( $activa, '1' ); ?> />
 				<?php esc_html_e( 'Sede activa', 'multisede-pos' ); ?>
@@ -269,7 +284,7 @@ class MSP_Sedes {
 		// Series de boleta y de factura: opcionales, pero si se ponen deben
 		// tener el formato de SUNAT y no chocar con la de otra sede. El bucle
 		// evita dos bloques gemelos que luego se corrigen solo en uno.
-		foreach ( array( 'boleta', 'factura' ) as $tipo ) {
+		foreach ( array( 'boleta', 'factura', 'nc_boleta', 'nc_factura' ) as $tipo ) {
 			$campo = 'msp_serie_' . $tipo;
 			$meta  = MSP_Comprobante::dato_tipo( $tipo, 'meta' );
 			$letra = MSP_Comprobante::dato_tipo( $tipo, 'prefijo' );

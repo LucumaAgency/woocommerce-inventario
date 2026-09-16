@@ -100,6 +100,16 @@ class MSP_REST {
 
 		register_rest_route(
 			self::NS,
+			'/diagnostico-factura',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( $this, 'diagnostico_factura' ),
+				'permission_callback' => array( $this, 'permiso' ),
+			)
+		);
+
+		register_rest_route(
+			self::NS,
 			'/diagnostico',
 			array(
 				'methods'             => 'GET',
@@ -136,6 +146,64 @@ class MSP_REST {
 		$res['entorno']     = isset( $ajustes['entorno'] ) ? $ajustes['entorno'] : '';
 		$res['sol_usuario'] = isset( $ajustes['sol_usuario'] ) ? $ajustes['sol_usuario'] : '';
 		return rest_ensure_response( $res );
+	}
+
+	/**
+	 * GET /diagnostico-factura
+	 *
+	 * Por qué el checkout muestra —o no— la casilla de factura. Responde desde
+	 * dentro del sitio, que es el único sitio donde la pregunta tiene respuesta:
+	 * la casilla depende de que haya sedes con serie de factura válida, de que
+	 * la clase esté cargada y de que su filtro llegue a engancharse.
+	 *
+	 * @return WP_REST_Response
+	 */
+	public function diagnostico_factura() {
+		$out = array(
+			'version_plugin'      => defined( 'MSP_VERSION' ) ? MSP_VERSION : '',
+			'clase_cargada'       => class_exists( 'MSP_Factura' ),
+			'filtro_enganchado'   => (bool) has_filter( 'woocommerce_checkout_fields' ),
+			'sedes_con_factura'   => array(),
+			'casilla_visible'     => false,
+			'checkout_es_bloques' => false,
+			'mensaje'             => '',
+		);
+
+		if ( ! $out['clase_cargada'] ) {
+			$out['mensaje'] = 'El plugin instalado es anterior a la v1.23.0: no trae facturas. Actualiza desde Plugins.';
+			return rest_ensure_response( $out );
+		}
+
+		foreach ( MSP_Factura::sedes_con_factura() as $sede_id => $serie ) {
+			$out['sedes_con_factura'][] = array(
+				'id'     => (int) $sede_id,
+				'nombre' => get_the_title( $sede_id ),
+				'serie'  => $serie,
+			);
+		}
+
+		$out['casilla_visible'] = MSP_Factura::disponible();
+
+		// El checkout de bloques no pasa por `woocommerce_checkout_fields`: los
+		// campos propios no aparecen ahí y hace falta integración aparte. Es la
+		// deuda D3 del checklist, y explicaría una casilla que no sale aunque
+		// todo lo demás esté bien.
+		$pagina = function_exists( 'wc_get_page_id' ) ? wc_get_page_id( 'checkout' ) : 0;
+		if ( $pagina > 0 ) {
+			$contenido                   = (string) get_post_field( 'post_content', $pagina );
+			$out['checkout_es_bloques']  = false !== strpos( $contenido, 'wp:woocommerce/checkout' );
+			$out['checkout_pagina_id']   = (int) $pagina;
+		}
+
+		if ( ! $out['sedes_con_factura'] ) {
+			$out['mensaje'] = 'Ninguna sede publicada tiene una serie de factura válida (F + 3, ej. F100). Ponla en cada sede.';
+		} elseif ( $out['checkout_es_bloques'] ) {
+			$out['mensaje'] = 'El checkout usa el bloque de WooCommerce, que no pinta campos propios. Cámbialo al checkout clásico ([woocommerce_checkout]) o hará falta integrarlo aparte.';
+		} elseif ( $out['casilla_visible'] ) {
+			$out['mensaje'] = 'Todo en orden: la casilla "Necesito factura" debe salir en el checkout, debajo del DNI. Si no la ves, prueba en una ventana privada: puede ser caché de página.';
+		}
+
+		return rest_ensure_response( $out );
 	}
 
 	/**

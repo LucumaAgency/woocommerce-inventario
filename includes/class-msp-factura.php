@@ -51,18 +51,47 @@ class MSP_Factura {
 			return false;
 		}
 
+		return ! empty( self::sedes_con_factura() );
+	}
+
+	/**
+	 * Sedes que pueden emitir facturas, con su serie.
+	 *
+	 * No basta con que la meta exista: una serie vacía o mal escrita no sirve
+	 * para emitir, y habilitar la casilla con ella prometería al cliente una
+	 * factura que después falla al reservar el correlativo.
+	 *
+	 * @return array sede_id => serie.
+	 */
+	public static function sedes_con_factura() {
+		if ( ! class_exists( 'MSP_Sedes' ) || ! class_exists( 'MSP_Comprobante' ) ) {
+			return array();
+		}
+
 		$sedes = get_posts(
 			array(
 				'post_type'      => MSP_Sedes::CPT,
 				'post_status'    => 'publish',
-				'posts_per_page' => 1,
+				'posts_per_page' => -1,
 				'fields'         => 'ids',
-				'meta_key'       => MSP_Comprobante::META_SERIE_FACTURA, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- Una consulta por carga de checkout, limitada a 1.
-				'meta_compare'   => 'EXISTS',
+				'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Pocas sedes, y el resultado se cachea abajo.
+					array(
+						'key'     => MSP_Comprobante::META_SERIE_FACTURA,
+						'compare' => 'EXISTS',
+					),
+				),
 			)
 		);
 
-		return ! empty( $sedes );
+		$con_serie = array();
+		foreach ( $sedes as $sede_id ) {
+			$serie = MSP_Comprobante::serie_de_sede( $sede_id, 'factura' );
+			if ( MSP_Comprobante::serie_valida( $serie, 'factura' ) ) {
+				$con_serie[ (int) $sede_id ] = $serie;
+			}
+		}
+
+		return $con_serie;
 	}
 
 	/**

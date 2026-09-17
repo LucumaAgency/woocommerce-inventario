@@ -228,6 +228,10 @@ class MSP_Ticket_EscPos {
 		$t .= self::centrar( MSP_Comprobante::numero( $c ), $cols );
 		$t .= self::ESC . 'E' . chr( 0 );
 
+		if ( ! empty( $c['prueba'] ) ) {
+			$t .= self::ESC . 'E' . chr( 1 ) . self::centrar( '*** TICKET DE PRUEBA ***', $cols ) . self::centrar( 'NO ES UN COMPROBANTE', $cols ) . self::ESC . 'E' . chr( 0 );
+		}
+
 		if ( 'anulado' === $c['baja_estado'] ) {
 			$t .= self::ESC . 'E' . chr( 1 ) . self::centrar( '*** ANULADA ***', $cols ) . self::ESC . 'E' . chr( 0 );
 		} elseif ( in_array( $c['baja_estado'], array( 'enviada', 'pendiente' ), true ) ) {
@@ -299,7 +303,7 @@ class MSP_Ticket_EscPos {
 			? self::centrar( 'Representacion impresa de la', $cols ) . self::centrar( 'factura electronica.', $cols )
 			: self::centrar( 'Representacion impresa de la boleta', $cols ) . self::centrar( 'de venta electronica.', $cols );
 		$pie .= self::centrar( 'Consultala en www.sunat.gob.pe', $cols );
-		if ( ! MSP_Emisor::es_produccion() ) {
+		if ( ! empty( $c['prueba'] ) || ! MSP_Emisor::es_produccion() ) {
 			$pie .= self::centrar( '*** DOCUMENTO DE PRUEBA ***', $cols );
 			$pie .= self::centrar( '*** SIN VALOR ***', $cols );
 		}
@@ -326,6 +330,10 @@ class MSP_Ticket_EscPos {
 	 * @return array
 	 */
 	private static function lineas( $c ) {
+		if ( ! empty( $c['lineas_prueba'] ) ) {
+			return $c['lineas_prueba'];
+		}
+
 		$lineas = array();
 
 		if ( empty( $c['pedido_id'] ) || ! function_exists( 'wc_get_order' ) ) {

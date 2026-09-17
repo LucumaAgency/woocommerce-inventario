@@ -221,6 +221,12 @@
 	}
 
 	$( '#msp-pos-tipo, #msp-pos-sede' ).on( 'change', sincronizarTipo );
+
+	// Ticket de prueba de la sede elegida, en otra pestaña: no toca el ticket
+	// que el cajero esté armando.
+	$( '#msp-pos-prueba' ).on( 'click', function () {
+		window.open( mspPOS.pruebaUrl + '&sede=' + encodeURIComponent( $( '#msp-pos-sede' ).val() ), '_blank', 'noopener' );
+	} );
 	$( '#msp-pos-ruc' ).on( 'input', function () {
 		this.value = this.value.replace( /[^0-9]/g, '' ).slice( 0, 11 );
 		sincronizarTipo();

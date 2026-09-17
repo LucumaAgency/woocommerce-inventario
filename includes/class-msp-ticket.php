@@ -32,11 +32,96 @@ class MSP_Ticket {
 	/** Acción de admin-post que sirve el ticket. */
 	const ACTION = 'msp_ticket';
 
+	/** Acción de admin-post que sirve el ticket de prueba. */
+	const ACTION_PRUEBA = 'msp_ticket_prueba';
+
 	/**
 	 * Engancha hooks.
 	 */
 	public function init() {
 		add_action( 'admin_post_' . self::ACTION, array( $this, 'servir' ) );
+		add_action( 'admin_post_' . self::ACTION_PRUEBA, array( $this, 'servir_prueba' ) );
+	}
+
+	/**
+	 * URL del ticket de prueba, sin la sede: el POS le añade `&sede=` con la
+	 * que esté elegida en el momento.
+	 *
+	 * @return string
+	 */
+	public static function url_prueba() {
+		// add_query_arg y no wp_nonce_url: esta devuelve la URL escapada
+		// (&amp;), y el JS le concatena la sede y la abre tal cual.
+		return add_query_arg(
+			array(
+				'action'   => self::ACTION_PRUEBA,
+				'_wpnonce' => wp_create_nonce( self::ACTION_PRUEBA ),
+			),
+			admin_url( 'admin-post.php' )
+		);
+	}
+
+	/**
+	 * Comprobante ficticio para probar la impresora.
+	 *
+	 * No se guarda en ninguna tabla, no pasa por la cola ni por SUNAT y no
+	 * reserva correlativo: la numeración real no tiene huecos que explicar. Va
+	 * con la serie de la sede y correlativo 0 para que el papel tenga el mismo
+	 * largo que uno de verdad, y lleva QR (con datos inventados) para probar
+	 * que la impresora lo saca legible.
+	 *
+	 * @param int $sede_id Sede desde la que se prueba.
+	 * @return array
+	 */
+	public static function comprobante_prueba( $sede_id ) {
+		$serie = MSP_Comprobante::serie_de_sede( $sede_id, 'boleta' );
+
+		return array(
+			'id'               => 0,
+			'prueba'           => true,
+			'pedido_id'        => 0,
+			'sede_id'          => (int) $sede_id,
+			'ruc'              => MSP_Emisor::ruc_de_sede( $sede_id ),
+			'tipo'             => 'boleta',
+			'entorno'          => MSP_Comprobante::entorno_actual(),
+			'serie'            => $serie ? $serie : 'B000',
+			'correlativo'      => 0,
+			'cliente_tipo_doc' => '0',
+			'cliente_num_doc'  => '',
+			'cliente_nombre'   => 'CLIENTE DE PRUEBA',
+			'total'            => 10.00,
+			'igv'              => 1.53,
+			'estado'           => 'prueba',
+			'hash'             => 'PRUEBA',
+			'baja_estado'      => '',
+			'emitido_at'       => current_time( 'mysql' ),
+			'lineas_prueba'    => array(
+				array(
+					'descripcion' => 'PRODUCTO DE PRUEBA',
+					'cantidad'    => 1,
+					'importe'     => 10.00,
+				),
+			),
+		);
+	}
+
+	/**
+	 * Sirve el ticket de prueba.
+	 */
+	public function servir_prueba() {
+		check_admin_referer( self::ACTION_PRUEBA );
+
+		if ( ! $this->puede() ) {
+			wp_die( esc_html__( 'Sin permiso para imprimir tickets.', 'multisede-pos' ) );
+		}
+
+		$sede_id = isset( $_GET['sede'] ) ? absint( wp_unslash( $_GET['sede'] ) ) : 0;
+		if ( ! $sede_id || 'msp_sede' !== get_post_type( $sede_id ) || ! MSP_Roles::puede_usuario_sede( $sede_id ) ) {
+			wp_die( esc_html__( 'No tienes acceso a esa sede.', 'multisede-pos' ) );
+		}
+
+		$this->render( self::comprobante_prueba( $sede_id ) );
+		exit;
 	}
 
 	/**
@@ -173,6 +258,10 @@ class MSP_Ticket {
 	 * @return array Lista de {descripcion, cantidad, importe}.
 	 */
 	private function lineas( $c ) {
+		if ( ! empty( $c['lineas_prueba'] ) ) {
+			return $c['lineas_prueba'];
+		}
+
 		$lineas = array();
 
 		if ( empty( $c['pedido_id'] ) || ! function_exists( 'wc_get_order' ) ) {
@@ -289,6 +378,10 @@ class MSP_Ticket {
 	<?php echo esc_html( MSP_Comprobante::numero( $c ) ); ?>
 </div>
 
+<?php if ( ! empty( $c['prueba'] ) ) : ?>
+	<div class="anulado"><?php esc_html_e( 'TICKET DE PRUEBA — NO ES UN COMPROBANTE', 'multisede-pos' ); ?></div>
+<?php endif; ?>
+
 <?php if ( 'anulado' === $c['baja_estado'] ) : ?>
 	<div class="anulado"><?php esc_html_e( 'ANULADA', 'multisede-pos' ); ?></div>
 <?php elseif ( $anulado ) : ?>
@@ -402,7 +495,7 @@ class MSP_Ticket {
 	);
 	?><br>
 	<?php esc_html_e( 'Consúltala en www.sunat.gob.pe', 'multisede-pos' ); ?>
-	<?php if ( ! MSP_Emisor::es_produccion() ) : ?>
+	<?php if ( ! empty( $c['prueba'] ) || ! MSP_Emisor::es_produccion() ) : ?>
 		<br><strong><?php esc_html_e( '*** DOCUMENTO DE PRUEBA — SIN VALOR ***', 'multisede-pos' ); ?></strong>
 	<?php endif; ?>
 </div>

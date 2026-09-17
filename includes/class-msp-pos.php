@@ -112,6 +112,7 @@ class MSP_POS {
 			array(
 				'ajaxurl'  => admin_url( 'admin-ajax.php' ),
 				'nonce'    => wp_create_nonce( 'msp_pos' ),
+				'pruebaUrl' => MSP_Ticket::url_prueba(),
 				'simbolo'  => get_woocommerce_currency_symbol(),
 				'decimals' => wc_get_price_decimals(),
 				'boletas'  => MSP_Cola::activa(),
@@ -169,6 +170,11 @@ class MSP_POS {
 						<option value="<?php echo esc_attr( $sede->ID ); ?>"><?php echo esc_html( $sede->post_title ); ?></option>
 					<?php endforeach; ?>
 				</select>
+				<?php
+				/* Para probar la impresora sin cobrar nada: abre un ticket
+				   ficticio de la sede elegida. No toca SUNAT ni la numeración. */
+				?>
+				<button type="button" class="button" id="msp-pos-prueba"><?php esc_html_e( 'Imprimir boleta de prueba', 'multisede-pos' ); ?></button>
 			</div>
 
 			<div class="msp-pos-grid">

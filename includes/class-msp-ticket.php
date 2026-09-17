@@ -230,9 +230,11 @@ class MSP_Ticket {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?php echo esc_html( MSP_Comprobante::numero( $c ) ); ?></title>
 <style>
-	/* 80 mm es el ancho estándar del papel térmico de mostrador. Con `auto` de
-	   alto, el ticket se corta donde termina en vez de gastar una hoja entera. */
-	@page { size: 80mm auto; margin: 0; }
+	/* 80 mm es el ancho estándar del papel térmico de mostrador. `size: 80mm
+	   auto` NO vale: Chrome descarta la regla entera y el PDF sale en A4. Aquí
+	   va un alto provisional y el script de abajo pone el alto real del ticket,
+	   para que el PDF mida 80 mm de ancho y termine donde termina el ticket. */
+	@page { size: 80mm 297mm; margin: 0; }
 	* { box-sizing: border-box; }
 	body {
 		margin: 0; padding: 6mm 4mm;
@@ -473,6 +475,26 @@ class MSP_Ticket {
 	</p>
 </div>
 
+<script>
+	/* Alto de página = alto del ticket, en mm (96 px por pulgada). Se aplica al
+	   cargar y justo antes de imprimir, cuando ya están ocultos los botones. */
+	( function () {
+		var estilo = document.createElement( 'style' );
+		document.head.appendChild( estilo );
+		function ajustar() {
+			var mm = Math.ceil( document.body.scrollHeight * 25.4 / 96 ) + 2;
+			estilo.textContent = '@page { size: 80mm ' + mm + 'mm; margin: 0; }';
+		}
+		window.addEventListener( 'load', ajustar );
+		window.addEventListener( 'beforeprint', function () {
+			var acc = document.querySelector( '.acciones' );
+			var antes = acc ? acc.style.display : '';
+			if ( acc ) { acc.style.display = 'none'; }
+			ajustar();
+			if ( acc ) { acc.style.display = antes; }
+		} );
+	} )();
+	</script>
 </body>
 </html>
 		<?php

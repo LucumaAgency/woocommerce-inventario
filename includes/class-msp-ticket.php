@@ -325,27 +325,30 @@ class MSP_Ticket {
 	   para que el PDF mida 80 mm de ancho y termine donde termina el ticket. */
 	@page { size: 80mm 297mm; margin: 0; }
 	* { box-sizing: border-box; }
+	/* Pensado para térmica: la página se imprime como imagen y una letra fina
+	   o menor de ~12 px sale gris y cortada. Sans-serif, gruesa y grande. */
 	body {
-		margin: 0; padding: 6mm 4mm;
-		width: 80mm;
-		font-family: "DejaVu Sans Mono", "Courier New", monospace;
-		font-size: 11px; line-height: 1.45; color: #000; background: #fff;
+		margin: 0 auto; padding: 4mm 3mm;
+		width: 100%; max-width: 80mm;
+		font-family: Arial, Helvetica, "Liberation Sans", sans-serif;
+		font-size: 14px; font-weight: 700; line-height: 1.35; color: #000; background: #fff;
+		-webkit-font-smoothing: none;
 	}
 	.c { text-align: center; }
-	.b { font-weight: 700; }
-	h1 { font-size: 13px; margin: 0 0 2px; text-transform: uppercase; }
-	.sub { font-size: 10px; }
-	hr { border: 0; border-top: 1px dashed #000; margin: 6px 0; }
+	.b { font-weight: 800; }
+	h1 { font-size: 16px; font-weight: 800; margin: 0 0 3px; text-transform: uppercase; }
+	.sub { font-size: 13px; }
+	hr { border: 0; border-top: 2px dashed #000; margin: 6px 0; }
 	table { width: 100%; border-collapse: collapse; }
-	td { padding: 1px 0; vertical-align: top; }
+	td { padding: 2px 0; vertical-align: top; }
 	td.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-	.tot td { font-size: 12px; }
-	.qr { margin: 8px auto 4px; width: 42mm; }
+	.tot td { font-size: 17px; font-weight: 800; }
+	.qr { margin: 8px auto 4px; width: 46mm; }
 	.qr svg { width: 100%; height: auto; display: block; }
-	.legal { font-size: 9px; text-align: center; margin-top: 6px; }
+	.legal { font-size: 12px; text-align: center; margin-top: 6px; }
 	.anulado {
-		border: 2px solid #000; text-align: center; font-weight: 700;
-		padding: 3px; margin: 6px 0; letter-spacing: .1em;
+		border: 3px solid #000; text-align: center; font-weight: 800;
+		padding: 4px; margin: 6px 0;
 	}
 	.acciones { text-align: center; padding: 12px; }
 	.acciones button, .acciones .btn {

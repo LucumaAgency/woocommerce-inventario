@@ -328,7 +328,7 @@ class MSP_Ticket {
 	/* Pensado para térmica: la página se imprime como imagen y una letra fina
 	   o menor de ~12 px sale gris y cortada. Sans-serif, gruesa y grande. */
 	body {
-		margin: 0 auto; padding: 4mm 3mm;
+		margin: 0 auto; padding: 3mm;
 		width: 100%; max-width: 80mm;
 		font-family: Arial, Helvetica, "Liberation Sans", sans-serif;
 		font-size: 14px; font-weight: 700; line-height: 1.35; color: #000; background: #fff;
@@ -358,7 +358,15 @@ class MSP_Ticket {
 	}
 	.acciones .btn-primario { background: #000; color: #fff; font-weight: 700; }
 	.acciones .aviso { font-size: 11px; margin-top: 10px; padding: 8px; border: 1px dashed #000; }
-	@media print { .acciones { display: none; } }
+	/* Al imprimir, el ticket llena el ancho que dé la impresora (RawBT puede
+	   preparar una página más ancha que 80 mm: con ancho fijo el contenido
+	   quedaba chico y pegado a la izquierda) y lleva el mismo margen arriba y
+	   abajo, para que quede centrado dentro del papel. */
+	@media print {
+		.acciones { display: none; }
+		html, body { width: 100%; }
+		body { max-width: none; margin: 0; padding: 3mm 2mm; }
+	}
 </style>
 </head>
 <body>

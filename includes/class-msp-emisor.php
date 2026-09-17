@@ -1016,6 +1016,11 @@ class MSP_Emisor {
 		return ( new \Greenter\Model\Sale\Invoice() )
 			->setUblVersion( '2.1' )
 			->setTipoOperacion( '0101' )
+			// Forma de pago (cac:PaymentTerms). Obligatoria en facturas: sin ella
+			// SUNAT rechaza con el 3244 «Debe consignar la información del tipo
+			// de transacción». En boletas es opcional y se envía igual. Toda venta
+			// del POS y de la web se cobra en el momento: siempre Contado.
+			->setFormaPago( new \Greenter\Model\Sale\FormaPagos\FormaPagoContado() )
 			->setTipoDoc( MSP_Comprobante::codigo_sunat( $c ) )
 			->setSerie( $c['serie'] )
 			// Correlativo a 8 dígitos, el mismo formato que muestra el panel y que

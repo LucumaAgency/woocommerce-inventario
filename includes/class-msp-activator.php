@@ -17,7 +17,7 @@ class MSP_Activator {
 	/**
 	 * Versión del esquema de base de datos.
 	 */
-	const DB_VERSION = '8';
+	const DB_VERSION = '9';
 
 	/**
 	 * Aplica el esquema si cambió desde la última vez.
@@ -44,9 +44,135 @@ class MSP_Activator {
 		set_transient( 'msp_migrando_db', 1, 30 );
 
 		self::crear_tablas();
+		self::reparar_series_1260();
 		update_option( 'msp_db_version', self::DB_VERSION );
 
 		delete_transient( 'msp_migrando_db' );
+	}
+
+	/**
+	 * Repara los comprobantes que la v1.26.0 guardó con los datos corridos.
+	 *
+	 * Al reservar faltaba un formato en el INSERT y wpdb corrió los demás una
+	 * posición: la serie quedó en 0, el nombre del cliente en 0 y la fecha de
+	 * emisión vacía. Un comprobante así no lo acepta SUNAT y el ticket sale sin
+	 * número.
+	 *
+	 * Se toma de nuevo la serie de la sede y el SIGUIENTE correlativo libre de
+	 * esa serie (no el que tenía: se calculó contra la serie buena, así que dos
+	 * filas rotas seguidas pueden compartirlo). Nunca se toca un comprobante
+	 * aceptado. Es idempotente: solo actúa sobre series inválidas.
+	 */
+	private static function reparar_series_1260() {
+		global $wpdb;
+
+		if ( ! class_exists( 'MSP_Comprobante' ) ) {
+			return;
+		}
+
+		$tabla = MSP_Comprobante::tabla();
+		$filas = $wpdb->get_results(
+			"SELECT * FROM {$tabla} WHERE serie NOT REGEXP '^[A-Z][0-9A-Z]{3}$' AND estado <> 'aceptado' ORDER BY id ASC", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			ARRAY_A
+		);
+		if ( empty( $filas ) ) {
+			return;
+		}
+
+		$reparados = array();
+
+		foreach ( $filas as $c ) {
+			$serie = MSP_Comprobante::serie_de_sede( (int) $c['sede_id'], $c['tipo'] );
+			if ( ! MSP_Comprobante::serie_valida( $serie, $c['tipo'] ) ) {
+				continue;
+			}
+
+			$order = ( $c['pedido_id'] && function_exists( 'wc_get_order' ) ) ? wc_get_order( (int) $c['pedido_id'] ) : null;
+
+			$nombre = trim( (string) $c['cliente_nombre'] );
+			if ( '' === $nombre || '0' === $nombre ) {
+				$nombre = 'CLIENTE VARIOS';
+				if ( ! empty( $c['doc_afectado_id'] ) ) {
+					$afectado = MSP_Comprobante::obtener( (int) $c['doc_afectado_id'] );
+					if ( $afectado && '' !== trim( (string) $afectado['cliente_nombre'] ) && '0' !== $afectado['cliente_nombre'] ) {
+						$nombre = $afectado['cliente_nombre'];
+					}
+				} elseif ( $order && class_exists( 'MSP_Cola' ) ) {
+					$nombre = MSP_Cola::nombre_cliente( $order );
+				}
+			}
+
+			$emitido = (string) $c['emitido_at'];
+			if ( '' === $emitido || 0 === strpos( $emitido, '0000' ) ) {
+				$emitido = ( $order && $order->get_date_created() )
+					? $order->get_date_created()->date( 'Y-m-d H:i:s' )
+					: current_time( 'mysql' );
+			}
+
+			for ( $intento = 0; $intento < 10; $intento++ ) {
+				$max = (int) $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT MAX(correlativo) FROM {$tabla} WHERE ruc = %s AND serie = %s AND entorno = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+						$c['ruc'],
+						$serie,
+						$c['entorno']
+					)
+				);
+
+				$suprimir = $wpdb->suppress_errors( true );
+				$ok       = $wpdb->update(
+					$tabla,
+					array(
+						'serie'           => $serie,
+						'correlativo'     => $max + 1,
+						'cliente_nombre'  => substr( $nombre, 0, 255 ),
+						'emitido_at'      => $emitido,
+						'estado'          => 'pendiente',
+						'intentos'        => 0,
+						'ultimo_error'    => null,
+						'hash'            => '',
+						'xml_path'        => '',
+						'cdr_path'        => '',
+						'proximo_intento' => current_time( 'mysql' ),
+					),
+					array( 'id' => (int) $c['id'] ),
+					array( '%s', '%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s' ),
+					array( '%d' )
+				);
+				$wpdb->suppress_errors( $suprimir );
+
+				if ( false !== $ok ) {
+					$c['serie']       = $serie;
+					$c['correlativo'] = $max + 1;
+					$reparados[]      = (int) $c['id'];
+
+					if ( $order ) {
+						$order->add_order_note(
+							sprintf(
+								/* translators: %s: número del comprobante. */
+								__( 'Comprobante reparado (fallo de la v1.26.0: se había guardado sin serie). Ahora es %s y se reenvía a SUNAT.', 'multisede-pos' ),
+								MSP_Comprobante::numero( $c )
+							)
+						);
+					}
+					break;
+				}
+			}
+		}
+
+		// La cola usa Action Scheduler, que no está listo en init prioridad 1.
+		// Se programan cuando WordPress terminó de cargar; si eso fallara, el
+		// barrido horario los recoge igual por su proximo_intento.
+		if ( $reparados && class_exists( 'MSP_Cola' ) ) {
+			add_action(
+				'wp_loaded',
+				function () use ( $reparados ) {
+					foreach ( $reparados as $id ) {
+						MSP_Cola::programar( $id, 30 );
+					}
+				}
+			);
+		}
 	}
 
 	/**

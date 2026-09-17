@@ -408,7 +408,10 @@ class MSP_Comprobante {
 					'estado'           => 'pendiente',
 					'emitido_at'       => $ahora,
 				),
-				array( '%d', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%f', '%f', '%s', '%s' )
+				// Un formato por campo y en el mismo orden. Si falta uno, wpdb corre
+				// los siguientes una posición: en la v1.26.0 la serie se guardaba
+				// como número (0), el nombre como 0 y la fecha como 2026.
+				array( '%d', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%f', '%f', '%s', '%s' )
 			);
 			$wpdb->suppress_errors( $suprimir );
 

@@ -8,12 +8,33 @@
 		return mspPOS.simbolo + ' ' + Number( valor ).toFixed( mspPOS.decimals );
 	}
 
-	function totalTicket() {
+	// Suma del ticket ANTES del descuento.
+	function subtotalTicket() {
 		var t = 0;
 		$.each( ticket, function ( _, it ) {
 			t += it.precio * it.qty;
 		} );
 		return t;
+	}
+
+	// Descuento tecleado por el cajero, acotado al propio ticket: nunca
+	// negativo y nunca mayor que el subtotal. Un descuento igual al subtotal
+	// dejaría el total en cero, que no es una venta: se deja un céntimo.
+	function descuentoTicket() {
+		var sub = subtotalTicket();
+		var d = parseFloat( $( '#msp-pos-descuento' ).val() );
+		if ( ! d || d < 0 || ! sub ) {
+			return 0;
+		}
+		d = Math.round( d * 100 ) / 100;
+		var techo = Math.round( ( sub - 0.01 ) * 100 ) / 100;
+		return d > techo ? techo : d;
+	}
+
+	// Lo que paga el cliente. Es el número que manda en TODAS partes: vuelto,
+	// límite del DNI y el importe que va al servidor.
+	function totalTicket() {
+		return Math.round( ( subtotalTicket() - descuentoTicket() ) * 100 ) / 100;
 	}
 
 	function pintarTicket() {
@@ -25,7 +46,9 @@
 			$body.append(
 				'<tr class="msp-pos-vacio"><td colspan="4">' + mspPOS.i18n.vacio + '</td></tr>'
 			);
+			$( '#msp-pos-subtotal' ).text( '—' );
 			$( '#msp-pos-total' ).text( '—' );
+			pintarDescuento();
 			calcularVuelto();
 			return;
 		}
@@ -48,7 +71,9 @@
 			$body.append( $tr );
 		} );
 
+		$( '#msp-pos-subtotal' ).text( fmt( subtotalTicket() ) );
 		$( '#msp-pos-total' ).text( fmt( totalTicket() ) );
+		pintarDescuento();
 		if ( typeof avisarDni === 'function' ) {
 			avisarDni();
 		}
@@ -68,6 +93,30 @@
 		}
 		pintarTicket();
 	}
+
+	// Avisa cuando lo tecleado no es lo que se va a aplicar (descuento mayor
+	// que el ticket), para que el cajero no cobre un número que no puso.
+	function pintarDescuento() {
+		var $aviso = $( '#msp-pos-descuento-aviso' );
+		if ( ! $aviso.length ) {
+			return;
+		}
+		var puesto = parseFloat( $( '#msp-pos-descuento' ).val() ) || 0;
+		var real = descuentoTicket();
+		if ( puesto > 0 && Math.abs( puesto - real ) >= 0.01 ) {
+			$aviso.text( mspPOS.i18n.descuento_tope + ' ' + fmt( real ) ).css( 'color', '#b32d2e' );
+		} else {
+			$aviso.text( '' );
+		}
+	}
+
+	$( '#msp-pos-descuento' ).on( 'input', function () {
+		$( '#msp-pos-subtotal' ).text( fmt( subtotalTicket() ) );
+		$( '#msp-pos-total' ).text( Object.keys( ticket ).length ? fmt( totalTicket() ) : '—' );
+		pintarDescuento();
+		avisarDni();
+		calcularVuelto();
+	} );
 
 	function calcularVuelto() {
 		var metodo = $( '#msp-pos-metodo' ).val();
@@ -321,6 +370,7 @@
 				tipo_comprobante: esFactura() ? 'factura' : 'boleta',
 				ruc: rucValor(),
 				razon_social: razonValor(),
+				descuento: descuentoTicket(),
 				items: JSON.stringify( items )
 			}
 		).done( function ( resp ) {
@@ -353,6 +403,7 @@
 			}
 			$msg.html( html );
 			ticket = {};
+			$( '#msp-pos-descuento' ).val( '' );
 			pintarTicket();
 			$( '#msp-pos-recibido' ).val( '' );
 			$( '#msp-pos-dni' ).val( '' );

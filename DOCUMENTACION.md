@@ -186,6 +186,7 @@ Una entrada por tienda, con metadatos:
 | `_msp_pos_metodo` | Método de pago en el POS |
 | `_msp_cajero_id` | Cajero que registró la venta POS |
 | `_msp_stock_aplicado` | `1` si el stock ya se descontó físicamente |
+| `_msp_pos_descuento` | Descuento en soles aplicado en el POS (v1.28.0). Informativo: el importe ya está repartido dentro de las líneas |
 
 ### Metadato de usuario
 
@@ -271,6 +272,37 @@ Añade los campos de stock por sede en la pestaña **Inventario** del producto (
 - Ticket con cantidades, métodos de pago (efectivo, tarjeta, Yape/Plin, otro) y cálculo de vuelto.
 - Al cobrar descuenta el stock de forma **atómica y condicional** (`descontar_si_hay`), crea un pedido de WooCommerce **completado** y dispara `msp_pos_venta_creada`. Si el stock se agotó entre la búsqueda y el cobro, el cobro falla y se devuelve lo ya descontado.
 - Repone stock y dispara `msp_pos_venta_anulada` si la venta se cancela/reembolsa.
+- **Descuento del ticket (v1.28.0).** Campo en soles bajo el subtotal; el total, el vuelto y el límite de S/ 700 de la boleta trabajan ya sobre el importe con descuento.
+
+#### Cómo se aplica el descuento
+
+**No viaja como línea negativa ni como nodo de descuento global: se reparte entre
+las líneas del pedido** (`aplicar_descuento()`). Cada línea baja en proporción a
+lo que pesa en el ticket, el reparto se hace en céntimos y el sobrante del
+redondeo se ajusta en la línea más cara. Tres motivos:
+
+1. **El comprobante declara lo cobrado.** `MSP_Emisor::lineas()` arma los totales
+   sumando las líneas del pedido; si el descuento viviera fuera de ellas, el XML
+   diría un importe y el ticket otro — y eso el verificador de SUNAT sí lo mira.
+2. **La nota de crédito devuelve lo correcto.** Una devolución parcial toma el
+   importe de la línea: con el descuento dentro, se devuelve lo que el cliente
+   pagó y no el precio de catálogo.
+3. **La caja cuadra sola**, porque `msp_pos_venta_creada` registra el total del
+   pedido.
+
+Se reparte el importe **que queda**, no el que se quita, para que ninguna línea
+caiga a cero en un ticket con una prenda barata (mínimo un céntimo por línea).
+El servidor vuelve a acotar el descuento contra el ticket que él mismo recalcula,
+no contra el que manda el navegador, y nunca deja el total en cero. Los totales
+se recalculan con `calculate_totals( false )`: con `true`, Woo devolvería las
+líneas a su precio de catálogo y el descuento se perdería.
+
+Queda registrado en el pedido (`_msp_pos_descuento`), en una nota con el importe
+y el nombre del cajero, y en la ficha del pedido en el admin.
+
+**No hay tope ni aprobación todavía:** cualquiera con `msp_usar_pos` puede rebajar
+lo que quiera. Si hiciera falta, el sitio natural es un ajuste con el máximo (en
+soles o en porcentaje) y el circuito de dos manos que ya usan las notas de crédito.
 
 ### MSP_Caja
 - Página **Caja** (capacidad `msp_gestionar_caja`).
@@ -576,6 +608,13 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.24.0** | **Varias empresas emisoras** — emisor por sede, numeración y certificados por RUC, resumen de bajas agrupado por emisor. **DB_VERSION 7** |
 | **1.25.0** | **Factura en el POS** — selector boleta/factura con RUC y razón social en mostrador |
 | **1.26.0** | **Notas de crédito** — devoluciones totales y parciales, con aprobación del gerente. **DB_VERSION 8**, **ROLES_VERSION 4** |
+| **1.26.2** | Arreglo del INSERT de `MSP_Comprobante::reservar()` (17 campos, 16 formatos: la serie se guardaba como `0`) + migración que repara las filas afectadas. **DB_VERSION 9** |
+| **1.26.3** | `FormaPago` Contado en el XML (rechazo 3244 de SUNAT) |
+| **1.26.4** | Ticket en PDF de 80 mm (el alto se calcula por JS: `@page size:80mm auto` no vale en Chrome) |
+| **1.27.0** | Botón «Imprimir boleta de prueba» en el POS (ticket ficticio, sin SUNAT ni correlativo) |
+| **1.27.1** | Letra sans-serif en negrita en el ticket |
+| **1.27.2** | Ancho 100 % al imprimir el ticket |
+| **1.28.0** | **Descuento en el POS** — campo de descuento en soles sobre el ticket, repartido entre las líneas del pedido |
 
 ---
 

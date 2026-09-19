@@ -125,6 +125,7 @@ class MSP_POS {
 					'error'          => __( 'Ocurrió un error. Inténtalo de nuevo.', 'multisede-pos' ),
 					'imprimir'       => __( 'Imprimir ticket', 'multisede-pos' ),
 					'vuelto'         => __( 'Vuelto', 'multisede-pos' ),
+					'descuento_tope' => __( 'El descuento no puede pasar del ticket: se aplicará', 'multisede-pos' ),
 					'dni_requerido'  => sprintf(
 						/* translators: %s: importe límite. */
 						__( 'Esta venta pasa de S/ %s: la boleta tiene que llevar el DNI y el nombre del cliente.', 'multisede-pos' ),
@@ -197,6 +198,20 @@ class MSP_POS {
 							<tr class="msp-pos-vacio"><td colspan="4"><?php esc_html_e( 'Ticket vacío', 'multisede-pos' ); ?></td></tr>
 						</tbody>
 						<tfoot>
+							<tr>
+								<td colspan="2"><?php esc_html_e( 'Subtotal', 'multisede-pos' ); ?></td>
+								<td colspan="2" id="msp-pos-subtotal">—</td>
+							</tr>
+							<tr>
+								<td colspan="2">
+									<label for="msp-pos-descuento"><?php esc_html_e( 'Descuento', 'multisede-pos' ); ?></label>
+								</td>
+								<td colspan="2">
+									<input type="number" id="msp-pos-descuento" step="0.01" min="0"
+										placeholder="0.00" autocomplete="off" />
+									<p id="msp-pos-descuento-aviso" class="description"></p>
+								</td>
+							</tr>
 							<tr>
 								<th colspan="2"><?php esc_html_e( 'Total', 'multisede-pos' ); ?></th>
 								<th colspan="2" id="msp-pos-total">—</th>
@@ -429,6 +444,13 @@ class MSP_POS {
 			}
 		}
 
+		// Descuento del ticket, en soles. Lo teclea el cajero (un cliente que
+		// regatea, una prenda con falla) y se reparte entre las líneas: así el
+		// comprobante declara lo que realmente se cobró, sin nodos de descuento
+		// global, y una nota de crédito posterior devuelve el importe correcto.
+		$descuento = isset( $_POST['descuento'] ) ? (float) wp_unslash( $_POST['descuento'] ) : 0.0;
+		$descuento = $descuento > 0 ? round( $descuento, 2 ) : 0.0;
+
 		// Validar stock disponible (físico − reservado) en la sede.
 		$normalizados = array();
 		$total_previo = 0.0;
@@ -452,6 +474,19 @@ class MSP_POS {
 		if ( empty( $normalizados ) ) {
 			wp_send_json_error( array( 'msg' => __( 'No hay productos válidos en el ticket.', 'multisede-pos' ) ), 400 );
 		}
+
+		// El descuento se acota aquí, contra el ticket que el servidor acaba de
+		// recalcular, no contra el que mandó el navegador. Un total en cero no
+		// es una venta y SUNAT no lo admite: el tope deja un céntimo.
+		$total_previo = round( $total_previo, 2 );
+		if ( $descuento > 0 ) {
+			$descuento = min( $descuento, round( $total_previo - 0.01, 2 ) );
+			$descuento = max( $descuento, 0.0 );
+		}
+
+		// A partir de aquí manda el total CON descuento: es el que decide si la
+		// boleta necesita identificar al comprador y el que se cobra.
+		$total_previo = round( $total_previo - $descuento, 2 );
 
 		// Cobrar en efectivo exige caja abierta. Si no la hay, ese dinero entra
 		// al cajón sin quedar registrado en ninguna parte: no suma al cuadre, no
@@ -662,6 +697,105 @@ class MSP_POS {
 			$product ? $product->get_name() : $producto_id,
 			(int) $disponible
 		);
+	}
+
+	/**
+	 * Reparte un descuento en soles entre las líneas del pedido.
+	 *
+	 * El descuento NO viaja como un nodo aparte ni como una línea negativa: se
+	 * baja el importe de cada línea en proporción a lo que pesa en el ticket.
+	 * Así el comprobante declara exactamente lo cobrado —SUNAT arma sus totales
+	 * sumando las líneas— y una nota de crédito posterior devuelve el importe
+	 * real, no el de catálogo.
+	 *
+	 * El reparto se hace en céntimos y el que sobra al redondear va a la línea
+	 * más cara, para que la suma de las líneas cuadre al céntimo con el total
+	 * del pedido. Si no cuadrara, el ticket y su QR dirían un importe y el XML
+	 * otro, que es de las cosas que el verificador de SUNAT sí mira.
+	 *
+	 * @param WC_Order $order     Pedido recién creado.
+	 * @param float    $descuento Importe a descontar, en soles.
+	 */
+	private function aplicar_descuento( $order, $descuento ) {
+		$lineas = array();
+		$bruto  = 0;
+
+		foreach ( $order->get_items() as $item_id => $item ) {
+			$centimos = (int) round( ( (float) $item->get_total() + (float) $item->get_total_tax() ) * 100 );
+			if ( $centimos <= 0 ) {
+				continue;
+			}
+			$lineas[ $item_id ] = $centimos;
+			$bruto             += $centimos;
+		}
+
+		$rebaja   = (int) round( $descuento * 100 );
+		$objetivo = $bruto - $rebaja;
+		if ( ! $lineas || $rebaja <= 0 || $objetivo < count( $lineas ) ) {
+			return;
+		}
+
+		// Se reparte el importe QUE QUEDA, no el que se quita: así ninguna línea
+		// puede caer a cero por un descuento grande sobre un ticket con una
+		// prenda barata. Cada línea se queda con lo que le toca en proporción,
+		// con un céntimo como mínimo, y el redondeo que sobra o falta se ajusta
+		// en las líneas más caras. La suma cuadra siempre con el total.
+		$nuevos = array();
+		$suma   = 0;
+		foreach ( $lineas as $item_id => $centimos ) {
+			$parte              = max( 1, (int) floor( $objetivo * $centimos / $bruto ) );
+			$nuevos[ $item_id ] = $parte;
+			$suma              += $parte;
+		}
+
+		$orden = array_keys( $lineas );
+		usort(
+			$orden,
+			function ( $a, $b ) use ( $lineas ) {
+				return $lineas[ $b ] <=> $lineas[ $a ];
+			}
+		);
+
+		$dif = $objetivo - $suma;
+		if ( $dif > 0 ) {
+			$nuevos[ $orden[0] ] += $dif;
+		}
+		$i = 0;
+		while ( $dif < 0 && $i < 4 * count( $orden ) ) {
+			$id    = $orden[ $i % count( $orden ) ];
+			$quita = min( -$dif, $nuevos[ $id ] - 1 );
+			$nuevos[ $id ] -= $quita;
+			$dif           += $quita;
+			++$i;
+		}
+
+		foreach ( $order->get_items() as $item_id => $item ) {
+			if ( ! isset( $nuevos[ $item_id ] ) || $nuevos[ $item_id ] === $lineas[ $item_id ] ) {
+				continue;
+			}
+
+			$bruto_linea = $lineas[ $item_id ];
+			$nuevo_bruto = $nuevos[ $item_id ];
+			$factor      = $nuevo_bruto / $bruto_linea;
+			$nuevo_total = round( (float) $item->get_total() * $factor, 2 );
+			$impuesto    = round( $nuevo_bruto / 100 - $nuevo_total, 2 );
+
+			$item->set_total( $nuevo_total );
+
+			// Con los impuestos de Woo apagados —la configuración de saraih: el
+			// IGV lo calcula el emisor a partir del importe con impuesto
+			// incluido— no hay nada que repartir aquí.
+			$impuestos = $item->get_taxes();
+			if ( ! empty( $impuestos['total'] ) && array_sum( $impuestos['total'] ) > 0 ) {
+				$suma_imp = array_sum( $impuestos['total'] );
+				foreach ( $impuestos['total'] as $rate_id => $monto ) {
+					$impuestos['total'][ $rate_id ] = round( $impuesto * ( (float) $monto / $suma_imp ), 2 );
+				}
+				$item->set_taxes( $impuestos );
+			}
+
+			$item->save();
+		}
 	}
 
 	/**

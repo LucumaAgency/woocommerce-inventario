@@ -115,3 +115,16 @@
 	color: #b32d2e;
 	font-weight: 600;
 }
+
+/* Descuento del ticket. El campo va en el pie de la tabla, pegado al total,
+   que es donde el cajero mira al cobrar. */
+#msp-pos-descuento {
+	width: 100px;
+	text-align: right;
+}
+#msp-pos-descuento-aviso {
+	margin: 2px 0 0;
+}
+#msp-pos-subtotal {
+	color: #50575e;
+}

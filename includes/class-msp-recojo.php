@@ -578,6 +578,16 @@ class MSP_Recojo {
 			? ' <span style="color:#1C8E80">(' . esc_html__( 'recogido', 'multisede-pos' ) . ')</span>'
 			: ' <span style="color:#b32d2e">(' . esc_html__( 'pendiente de recojo', 'multisede-pos' ) . ')</span>';
 		echo '</p>';
+
+		// El descuento del POS no se ve en los totales del pedido: va repartido
+		// dentro de las líneas, que es lo que exige el comprobante. Aquí se dice
+		// para que el gerente sepa que ese precio no es el de catálogo.
+		$descuento = (float) $order->get_meta( '_msp_pos_descuento' );
+		if ( $descuento > 0 ) {
+			echo '<p><strong>' . esc_html__( 'Descuento aplicado en el POS:', 'multisede-pos' ) . '</strong> ';
+			echo wp_kses_post( wc_price( $descuento ) );
+			echo '</p>';
+		}
 	}
 
 	/**

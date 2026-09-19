@@ -283,7 +283,9 @@
 			.text( factura && ! puede ? mspPOS.i18n.sede_sin_serie : '' )
 			.css( 'color', '#b32d2e' );
 
-		$( '#msp-pos-ruc-aviso' ).text( faltaFactura() ).css( 'color', '#b32d2e' );
+		// El aviso del padrón (RUC de baja, no habido, sin razón social) solo se
+		// ve cuando no falta ningún dato: primero lo que impide cobrar.
+		$( '#msp-pos-ruc-aviso' ).text( faltaFactura() || rucAviso ).css( 'color', '#b32d2e' );
 	}
 
 	$( '#msp-pos-tipo, #msp-pos-sede' ).on( 'change', sincronizarTipo );
@@ -293,9 +295,65 @@
 	$( '#msp-pos-prueba' ).on( 'click', function () {
 		window.open( mspPOS.pruebaUrl + '&sede=' + encodeURIComponent( $( '#msp-pos-sede' ).val() ), '_blank', 'noopener' );
 	} );
+	// Consulta del RUC: la razón social se rellena sola en cuanto el número
+	// está completo. Es una ayuda, no un requisito — si el padrón no contesta,
+	// el campo se queda editable y el cajero lo escribe como hasta ahora.
+	var rucUltimo = '';
+	var rucTimer = null;
+	// Lo que dijo el padrón sobre este RUC. Vive aparte porque sincronizarTipo()
+	// reescribe ese mismo aviso y si no se perdería en el siguiente repintado.
+	var rucAviso = '';
+
+	function buscarRazon() {
+		if ( ! mspPOS.ruc || ! mspPOS.ruc.activa ) {
+			return;
+		}
+		var ruc = rucValor();
+		if ( 11 !== ruc.length || ruc === rucUltimo ) {
+			return;
+		}
+		rucUltimo = ruc;
+
+		rucAviso = '';
+		$( '#msp-pos-ruc-aviso' ).text( mspPOS.i18n.ruc_buscando ).css( 'color', '' );
+
+		$.post( mspPOS.ajaxurl, {
+			action: 'msp_consultar_ruc',
+			nonce: mspPOS.ruc.nonce,
+			ruc: ruc
+		} ).done( function ( resp ) {
+			// Entre la consulta y la respuesta el cajero pudo cambiar el RUC.
+			if ( rucValor() !== ruc ) {
+				return;
+			}
+			if ( ! resp || ! resp.success || ! resp.data || ! resp.data.encontrado ) {
+				rucAviso = mspPOS.i18n.ruc_sin_datos;
+				sincronizarTipo();
+				return;
+			}
+			// No se pisa lo que el cajero ya escribió: si hay un nombre puesto
+			// a mano, manda el suyo.
+			if ( ! razonValor() ) {
+				$( '#msp-pos-razon-social' ).val( resp.data.razon_social );
+			}
+			rucAviso = resp.data.aviso || '';
+			sincronizarTipo();
+		} ).fail( function () {
+			if ( rucValor() === ruc ) {
+				rucAviso = mspPOS.i18n.ruc_sin_datos;
+				sincronizarTipo();
+			}
+		} );
+	}
+
 	$( '#msp-pos-ruc' ).on( 'input', function () {
 		this.value = this.value.replace( /[^0-9]/g, '' ).slice( 0, 11 );
+		if ( 11 !== rucValor().length ) {
+			rucAviso = '';
+		}
 		sincronizarTipo();
+		clearTimeout( rucTimer );
+		rucTimer = setTimeout( buscarRazon, 250 );
 	} );
 	$( '#msp-pos-razon-social' ).on( 'input', sincronizarTipo );
 	sincronizarTipo();

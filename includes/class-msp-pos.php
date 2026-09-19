@@ -117,6 +117,10 @@ class MSP_POS {
 				'decimals' => wc_get_price_decimals(),
 				'boletas'  => MSP_Cola::activa(),
 				'limiteDni' => MSP_Comprobante::LIMITE_DNI,
+				'ruc'      => array(
+					'activa' => MSP_Ruc::activa(),
+					'nonce'  => wp_create_nonce( 'msp_ruc' ),
+				),
 				'i18n'     => array(
 					'sin_resultados' => __( 'Sin resultados', 'multisede-pos' ),
 					'sin_stock'      => __( 'Sin stock', 'multisede-pos' ),
@@ -139,6 +143,8 @@ class MSP_POS {
 					'sede_sin_serie' => __( 'Esta tienda no tiene serie de factura configurada: solo puede emitir boletas.', 'multisede-pos' ),
 					'abrir_caja'     => __( '¿Con cuánto efectivo abres la caja? (0 si empiezas sin fondo)', 'multisede-pos' ),
 					'abriendo'       => __( 'Abriendo caja…', 'multisede-pos' ),
+					'ruc_buscando'   => __( 'Buscando la razón social…', 'multisede-pos' ),
+					'ruc_sin_datos'  => __( 'No encontramos la razón social: escríbela como figura en SUNAT.', 'multisede-pos' ),
 				),
 			)
 		);

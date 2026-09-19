@@ -231,6 +231,47 @@ class MSP_Factura {
 			// El checkout se repinta solo al cambiar envío o pago.
 			if ( window.jQuery ) { jQuery( document.body ).on( 'updated_checkout', sincronizar ); }
 			sincronizar();
+
+			<?php if ( class_exists( 'MSP_Ruc' ) && MSP_Ruc::activa() ) : ?>
+			// La razón social se rellena sola al completar el RUC. Es una ayuda:
+			// si el padrón no contesta, el campo se queda como estaba y el
+			// cliente lo escribe. Quien valida sigue siendo el servidor.
+			var ajaxurl = <?php echo wp_json_encode( admin_url( 'admin-ajax.php' ) ); ?>;
+			var nonce = <?php echo wp_json_encode( wp_create_nonce( 'msp_ruc' ) ); ?>;
+			var ultimo = '';
+
+			function buscarRazon() {
+				var campoRuc = document.getElementById( 'msp_ruc' );
+				var campoRazon = document.getElementById( 'msp_razon_social' );
+				if ( ! campoRuc || ! campoRazon ) { return; }
+
+				var ruc = ( campoRuc.value || '' ).replace( /[^0-9]/g, '' );
+				if ( 11 !== ruc.length || ruc === ultimo ) { return; }
+				ultimo = ruc;
+
+				// No se pisa lo que el cliente ya escribió.
+				if ( campoRazon.value.trim() ) { return; }
+
+				var cuerpo = new URLSearchParams();
+				cuerpo.append( 'action', 'msp_consultar_ruc' );
+				cuerpo.append( 'nonce', nonce );
+				cuerpo.append( 'ruc', ruc );
+
+				fetch( ajaxurl, { method: 'POST', body: cuerpo, credentials: 'same-origin' } )
+					.then( function ( r ) { return r.json(); } )
+					.then( function ( resp ) {
+						if ( ! resp || ! resp.success || ! resp.data || ! resp.data.encontrado ) { return; }
+						if ( campoRazon.value.trim() ) { return; }
+						if ( ( campoRuc.value || '' ).replace( /[^0-9]/g, '' ) !== ruc ) { return; }
+						campoRazon.value = resp.data.razon_social;
+					} )
+					.catch( function () {} );
+			}
+
+			document.addEventListener( 'input', function ( e ) {
+				if ( e.target && 'msp_ruc' === e.target.id ) { buscarRazon(); }
+			} );
+			<?php endif; ?>
 		} )();
 		</script>
 		<?php

@@ -86,6 +86,7 @@ multisede-pos/
 │   ├── class-msp-recojo.php       # Sede de recojo en checkout + reserva de stock
 │   ├── class-msp-frontend.php     # Compra por tienda: stock visible y validación por sede
 │   ├── class-msp-pos.php          # Punto de venta de mostrador (AJAX)
+│   ├── class-msp-ruc.php          # Razon social desde el padron de SUNAT (cache)
 │   ├── class-msp-caja.php         # Caja chica: sesiones, movimientos, arqueo
 │   ├── class-msp-comprobante.php  # Reserva de correlativos y acceso a la tabla
 │   ├── class-msp-emisor.php       # Motor Greenter: XML, firma y envio a SUNAT
@@ -315,6 +316,17 @@ soles o en porcentaje) y el circuito de dos manos que ya usan las notas de créd
 > llamada a `aplicar_descuentos()`**: el método estaba y no lo invocaba nadie, así
 > que el pedido se creaba a precio de lista y el ticket salía sin la rebaja.
 > Corregido en la 1.29.0.
+
+### MSP_Ruc (v1.30.0)
+- Rellena sola la **razón social** al teclear el RUC, en el **POS** y en el **checkout**.
+- No es comodidad: **SUNAT compara ese nombre con su padrón**, así que un dedazo se convierte en una factura observada con la venta ya cobrada.
+- **Nunca bloquea la venta.** Timeout de 2 segundos; si el padrón no contesta, el campo se queda editable y se escribe a mano, como antes. El AJAX responde `200` incluso cuando no encuentra nada: no hallar el nombre no es un error de la venta.
+- **No pisa lo que ya se escribió**: si hay un nombre puesto a mano, manda el suyo.
+- **Solo sale a la red cuando el RUC ya pasó la validación local** (11 dígitos, tipo y dígito verificador módulo 11, desde la v1.23.0). Un número mal tecleado no llega a molestar a nadie.
+- **Cache de 30 días por RUC** en un transient (los clientes de una tienda se repiten). Un RUC que no está en el padrón se cachea un día.
+- **Avisa si el contribuyente no está ACTIVO o no es HABIDO.** No impide emitir, pero conviene saberlo antes de cobrar.
+- **Proveedor configurable** en *Caja → Facturación*: por defecto un padrón público y gratuito (`https://openruc.com/api/ruc/{ruc}`, sin registro ni API key), cambiable por uno de pago o por una copia propia del padrón reducido de SUNAT. El filtro `msp_ruc_ajustes` permite lo mismo desde código. El `{ruc}` de la URL se reemplaza por el número.
+- El contrato que espera del proveedor es un JSON con `razon_social` y, si los trae, `estado`, `condicion`, `direccion` y `as_of`.
 
 ### MSP_Caja
 - Página **Caja** (capacidad `msp_gestionar_caja`).
@@ -628,6 +640,7 @@ La página **Ayuda** queda siempre disponible en el panel con los flujos del dí
 | **1.27.2** | Ancho 100 % al imprimir el ticket |
 | **1.28.0** | **Descuento en el POS** — campo de descuento en soles sobre el ticket. **Rota: la llamada a `aplicar_descuento()` no llegó al archivo, así que el pedido se creaba a precio de lista** |
 | **1.29.0** | **Descuento por producto** — una casilla en cada línea del ticket; el pedido, el comprobante y el ticket impreso llevan el precio ya descontado. Arregla la 1.28.0 |
+| **1.30.0** | **Autocompletar la razón social desde el RUC** — en el POS y en el checkout, contra un padrón público gratuito, con cache y proveedor configurable |
 
 ---
 

@@ -80,6 +80,19 @@ class MSP_Facturacion {
 				? sanitize_key( wp_unslash( $_POST['escpos_codepage'] ) )
 				: 'cp850';
 			update_option( self::opcion(), $nuevos );
+
+			// Consulta del RUC. Vive en su propia opción porque no es parte de
+			// la emisión: es una ayuda para teclear menos.
+			update_option(
+				MSP_Ruc::OPCION,
+				array(
+					'activa'   => ! empty( $_POST['ruc_consulta_activa'] ) ? 1 : 0,
+					'endpoint' => isset( $_POST['ruc_consulta_endpoint'] )
+						? esc_url_raw( wp_unslash( $_POST['ruc_consulta_endpoint'] ) )
+						: MSP_Ruc::ENDPOINT,
+				)
+			);
+
 			$aviso = 'guardado';
 
 		} elseif ( 'guardar_emisor' === $accion ) {
@@ -409,6 +422,34 @@ class MSP_Facturacion {
 						<th scope="row"><label for="escpos_copias"><?php esc_html_e( 'Copias', 'multisede-pos' ); ?></label></th>
 						<td>
 							<input type="number" name="escpos_copias" id="escpos_copias" min="1" max="3" value="<?php echo esc_attr( $esc['copias'] ); ?>" />
+						</td>
+					</tr>
+				</table>
+
+				<h2><?php esc_html_e( 'Consulta del RUC', 'multisede-pos' ); ?></h2>
+				<p class="description" style="max-width:44em">
+					<?php esc_html_e( 'Rellena sola la razón social al teclear el RUC, en el mostrador y en el checkout. SUNAT compara ese nombre con su padrón, así que un dedazo se convierte en una factura observada con la venta ya cobrada. Es una ayuda, no un requisito: si el padrón no contesta en dos segundos, el campo se queda editable y se escribe a mano.', 'multisede-pos' ); ?>
+				</p>
+
+				<?php $aj_ruc = MSP_Ruc::ajustes(); ?>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Autocompletar', 'multisede-pos' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="ruc_consulta_activa" value="1" <?php checked( $aj_ruc['activa'] ); ?> />
+								<?php esc_html_e( 'Buscar la razón social al completar el RUC', 'multisede-pos' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="ruc_consulta_endpoint"><?php esc_html_e( 'Padrón', 'multisede-pos' ); ?></label></th>
+						<td>
+							<input type="url" class="large-text code" name="ruc_consulta_endpoint" id="ruc_consulta_endpoint"
+								value="<?php echo esc_attr( $aj_ruc['endpoint'] ); ?>" />
+							<p class="description">
+								<?php esc_html_e( 'El {ruc} de la dirección se reemplaza por el número. Por defecto se usa un padrón público y gratuito, sin registro. Aquí se cambia por uno de pago o por una copia propia del padrón de SUNAT sin tocar nada más.', 'multisede-pos' ); ?>
+							</p>
 						</td>
 					</tr>
 				</table>

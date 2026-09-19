@@ -56,6 +56,10 @@ class MSP_Plugin {
 		$factura = new MSP_Factura();
 		$factura->init();
 
+		// Consulta del RUC: la razón social se rellena sola.
+		$ruc = new MSP_Ruc();
+		$ruc->init();
+
 		// Compra por tienda en el frontend (stock de la sede elegida).
 		$frontend = new MSP_Frontend();
 		$frontend->init();

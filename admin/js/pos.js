@@ -2,33 +2,51 @@
 ( function ( $ ) {
 	'use strict';
 
-	var ticket = {}; // id -> { id, nombre, precio, qty }
+	var ticket = {}; // id -> { id, nombre, precio, qty, desc }
 
 	function fmt( valor ) {
 		return mspPOS.simbolo + ' ' + Number( valor ).toFixed( mspPOS.decimals );
 	}
 
-	// Suma del ticket ANTES del descuento.
-	function subtotalTicket() {
-		var t = 0;
-		$.each( ticket, function ( _, it ) {
-			t += it.precio * it.qty;
-		} );
-		return t;
+	// Importe de lista de una línea, antes de su descuento.
+	function brutoLinea( it ) {
+		return Math.round( it.precio * it.qty * 100 ) / 100;
 	}
 
-	// Descuento tecleado por el cajero, acotado al propio ticket: nunca
-	// negativo y nunca mayor que el subtotal. Un descuento igual al subtotal
-	// dejaría el total en cero, que no es una venta: se deja un céntimo.
-	function descuentoTicket() {
-		var sub = subtotalTicket();
-		var d = parseFloat( $( '#msp-pos-descuento' ).val() );
-		if ( ! d || d < 0 || ! sub ) {
+	// Descuento de UNA línea, acotado a la propia línea: nunca negativo y
+	// nunca tanto como para dejarla en cero, que no es una venta.
+	function descLinea( it ) {
+		var bruto = brutoLinea( it );
+		var d = Number( it.desc );
+		if ( ! d || d < 0 || ! bruto ) {
 			return 0;
 		}
 		d = Math.round( d * 100 ) / 100;
-		var techo = Math.round( ( sub - 0.01 ) * 100 ) / 100;
+		var techo = Math.round( ( bruto - 0.01 ) * 100 ) / 100;
 		return d > techo ? techo : d;
+	}
+
+	// Lo que se cobra por esa línea.
+	function netoLinea( it ) {
+		return Math.round( ( brutoLinea( it ) - descLinea( it ) ) * 100 ) / 100;
+	}
+
+	// Suma del ticket a precio de lista.
+	function subtotalTicket() {
+		var t = 0;
+		$.each( ticket, function ( _, it ) {
+			t += brutoLinea( it );
+		} );
+		return Math.round( t * 100 ) / 100;
+	}
+
+	// Suma de los descuentos de todas las líneas.
+	function descuentoTicket() {
+		var t = 0;
+		$.each( ticket, function ( _, it ) {
+			t += descLinea( it );
+		} );
+		return Math.round( t * 100 ) / 100;
 	}
 
 	// Lo que paga el cliente. Es el número que manda en TODAS partes: vuelto,
@@ -47,8 +65,8 @@
 				'<tr class="msp-pos-vacio"><td colspan="4">' + mspPOS.i18n.vacio + '</td></tr>'
 			);
 			$( '#msp-pos-subtotal' ).text( '—' );
+			$( '#msp-pos-descuento-total' ).text( '—' );
 			$( '#msp-pos-total' ).text( '—' );
-			pintarDescuento();
 			calcularVuelto();
 			return;
 		}
@@ -62,7 +80,19 @@
 					$( '<input type="number" min="1" class="msp-qty" />' ).val( it.qty )
 				)
 			);
-			$tr.append( $( '<td/>' ).text( fmt( it.precio * it.qty ) ) );
+			$tr.append(
+				$( '<td/>' ).append(
+					$( '<input type="number" min="0" step="0.01" class="msp-desc" placeholder="0.00" />' )
+						.val( it.desc ? it.desc : '' )
+				)
+			);
+			var $importe = $( '<td/>' ).text( fmt( netoLinea( it ) ) );
+			if ( descLinea( it ) > 0 ) {
+				// El precio de lista se queda a la vista, tachado: el cliente
+				// tiene que poder ver de dónde sale la rebaja.
+				$importe.append( $( '<s class="msp-lista"/>' ).text( ' ' + fmt( brutoLinea( it ) ) ) );
+			}
+			$tr.append( $importe );
 			$tr.append(
 				$( '<td/>' ).append(
 					$( '<a href="#" class="msp-pos-quitar">&times;</a>' )
@@ -72,8 +102,8 @@
 		} );
 
 		$( '#msp-pos-subtotal' ).text( fmt( subtotalTicket() ) );
+		$( '#msp-pos-descuento-total' ).text( descuentoTicket() > 0 ? '− ' + fmt( descuentoTicket() ) : '—' );
 		$( '#msp-pos-total' ).text( fmt( totalTicket() ) );
-		pintarDescuento();
 		if ( typeof avisarDni === 'function' ) {
 			avisarDni();
 		}
@@ -88,35 +118,12 @@
 				id: prod.id,
 				nombre: prod.nombre,
 				precio: prod.precio,
-				qty: 1
+				qty: 1,
+				desc: 0
 			};
 		}
 		pintarTicket();
 	}
-
-	// Avisa cuando lo tecleado no es lo que se va a aplicar (descuento mayor
-	// que el ticket), para que el cajero no cobre un número que no puso.
-	function pintarDescuento() {
-		var $aviso = $( '#msp-pos-descuento-aviso' );
-		if ( ! $aviso.length ) {
-			return;
-		}
-		var puesto = parseFloat( $( '#msp-pos-descuento' ).val() ) || 0;
-		var real = descuentoTicket();
-		if ( puesto > 0 && Math.abs( puesto - real ) >= 0.01 ) {
-			$aviso.text( mspPOS.i18n.descuento_tope + ' ' + fmt( real ) ).css( 'color', '#b32d2e' );
-		} else {
-			$aviso.text( '' );
-		}
-	}
-
-	$( '#msp-pos-descuento' ).on( 'input', function () {
-		$( '#msp-pos-subtotal' ).text( fmt( subtotalTicket() ) );
-		$( '#msp-pos-total' ).text( Object.keys( ticket ).length ? fmt( totalTicket() ) : '—' );
-		pintarDescuento();
-		avisarDni();
-		calcularVuelto();
-	} );
 
 	function calcularVuelto() {
 		var metodo = $( '#msp-pos-metodo' ).val();
@@ -189,6 +196,16 @@
 		var q = parseInt( $( this ).val(), 10 );
 		if ( ticket[ id ] && q >= 1 ) {
 			ticket[ id ].qty = q;
+		}
+		pintarTicket();
+	} );
+	// Descuento de la línea. Se repinta al soltar el campo, no en cada tecla,
+	// para no reescribir el valor mientras el cajero lo está escribiendo.
+	$( '#msp-pos-items' ).on( 'change blur', '.msp-desc', function () {
+		var id = $( this ).closest( 'tr' ).data( 'id' );
+		var d = parseFloat( $( this ).val() );
+		if ( ticket[ id ] ) {
+			ticket[ id ].desc = ! d || d < 0 ? 0 : Math.round( d * 100 ) / 100;
 		}
 		pintarTicket();
 	} );
@@ -347,7 +364,11 @@
 		}
 
 		var items = ids.map( function ( id ) {
-			return { id: ticket[ id ].id, qty: ticket[ id ].qty };
+			return {
+				id: ticket[ id ].id,
+				qty: ticket[ id ].qty,
+				desc: descLinea( ticket[ id ] )
+			};
 		} );
 
 		var $btn = $( this ).prop( 'disabled', true );
@@ -370,7 +391,6 @@
 				tipo_comprobante: esFactura() ? 'factura' : 'boleta',
 				ruc: rucValor(),
 				razon_social: razonValor(),
-				descuento: descuentoTicket(),
 				items: JSON.stringify( items )
 			}
 		).done( function ( resp ) {
@@ -403,7 +423,6 @@
 			}
 			$msg.html( html );
 			ticket = {};
-			$( '#msp-pos-descuento' ).val( '' );
 			pintarTicket();
 			$( '#msp-pos-recibido' ).val( '' );
 			$( '#msp-pos-dni' ).val( '' );

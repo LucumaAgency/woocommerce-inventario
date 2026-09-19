@@ -116,15 +116,18 @@
 	font-weight: 600;
 }
 
-/* Descuento del ticket. El campo va en el pie de la tabla, pegado al total,
-   que es donde el cajero mira al cobrar. */
-#msp-pos-descuento {
-	width: 100px;
+/* Descuento por producto: una casilla en cada línea del ticket, y el precio
+   de lista tachado al lado del importe que se cobra. */
+.msp-pos-ticket .msp-desc {
+	width: 80px;
 	text-align: right;
 }
-#msp-pos-descuento-aviso {
-	margin: 2px 0 0;
+.msp-pos-ticket .msp-lista {
+	color: #787c82;
+	font-size: 11px;
+	margin-left: 4px;
 }
-#msp-pos-subtotal {
+#msp-pos-subtotal,
+#msp-pos-descuento-total {
 	color: #50575e;
 }

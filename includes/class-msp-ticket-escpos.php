@@ -268,6 +268,9 @@ class MSP_Ticket_EscPos {
 					number_format( $l['importe'], 2 ),
 					$cols
 				);
+				if ( ! empty( $l['descuento'] ) ) {
+					$t .= self::lr( '  Dscto. aplicado', '-' . number_format( $l['descuento'], 2 ), $cols );
+				}
 			}
 		} else {
 			$t .= self::lr( 'Venta', number_format( $total, 2 ), $cols );
@@ -346,10 +349,17 @@ class MSP_Ticket_EscPos {
 		}
 
 		foreach ( $order->get_items() as $item ) {
+			// El importe es el de la línea YA descontada: es lo que se cobró y
+			// lo que declara el comprobante. El descuento se lleva aparte solo
+			// para decirlo en el papel.
+			$neto  = (float) $order->get_line_total( $item, true );
+			$lista = (float) $order->get_line_subtotal( $item, true );
+
 			$lineas[] = array(
 				'descripcion' => $item->get_name(),
 				'cantidad'    => (int) $item->get_quantity(),
-				'importe'     => (float) $order->get_line_total( $item, true ),
+				'importe'     => $neto,
+				'descuento'   => round( $lista - $neto, 2 ) > 0 ? round( $lista - $neto, 2 ) : 0.0,
 			);
 		}
 

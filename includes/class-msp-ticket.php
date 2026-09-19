@@ -274,10 +274,17 @@ class MSP_Ticket {
 		}
 
 		foreach ( $order->get_items() as $item ) {
+			// El importe es el de la línea YA descontada: es lo que se cobró y
+			// lo que declara el comprobante. El descuento se lleva aparte solo
+			// para decirlo en el papel.
+			$neto  = (float) $order->get_line_total( $item, true );
+			$lista = (float) $order->get_line_subtotal( $item, true );
+
 			$lineas[] = array(
 				'descripcion' => $item->get_name(),
 				'cantidad'    => (int) $item->get_quantity(),
-				'importe'     => (float) $order->get_line_total( $item, true ),
+				'importe'     => $neto,
+				'descuento'   => round( $lista - $neto, 2 ) > 0 ? round( $lista - $neto, 2 ) : 0.0,
 			);
 		}
 
@@ -346,6 +353,7 @@ class MSP_Ticket {
 	.qr { margin: 8px auto 4px; width: 46mm; }
 	.qr svg { width: 100%; height: auto; display: block; }
 	.legal { font-size: 12px; text-align: center; margin-top: 6px; }
+	.msp-dscto td { font-size: 12px; font-weight: 700; }
 	.anulado {
 		border: 3px solid #000; text-align: center; font-weight: 800;
 		padding: 4px; margin: 6px 0;
@@ -427,9 +435,17 @@ class MSP_Ticket {
 				<td colspan="2"><?php echo esc_html( $l['descripcion'] ); ?></td>
 			</tr>
 			<tr>
-				<td><?php echo esc_html( $l['cantidad'] ); ?> x</td>
+				<td><?php echo esc_html( $l['cantidad'] ); ?> x <?php echo esc_html( number_format( $l['importe'] / max( 1, $l['cantidad'] ), 2 ) ); ?></td>
 				<td class="n"><?php echo esc_html( number_format( $l['importe'], 2 ) ); ?></td>
 			</tr>
+			<?php if ( ! empty( $l['descuento'] ) ) : ?>
+				<tr class="msp-dscto">
+					<td colspan="2"><?php
+						/* translators: %s: importe del descuento. */
+						printf( esc_html__( 'Descuento aplicado: %s', 'multisede-pos' ), esc_html( number_format( $l['descuento'], 2 ) ) );
+					?></td>
+				</tr>
+			<?php endif; ?>
 		<?php endforeach; ?>
 	<?php else : ?>
 		<tr>

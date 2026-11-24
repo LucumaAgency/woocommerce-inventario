@@ -284,6 +284,7 @@ class MSP_Sedes {
 		// Series de boleta y de factura: opcionales, pero si se ponen deben
 		// tener el formato de SUNAT y no chocar con la de otra sede. El bucle
 		// evita dos bloques gemelos que luego se corrigen solo en uno.
+		$tomadas = array(); // Series ya guardadas en esta misma sede, en este guardado.
 		foreach ( array( 'boleta', 'factura', 'nc_boleta', 'nc_factura' ) as $tipo ) {
 			$campo = 'msp_serie_' . $tipo;
 			$meta  = MSP_Comprobante::dato_tipo( $tipo, 'meta' );
@@ -308,6 +309,14 @@ class MSP_Sedes {
 					60
 				);
 				delete_post_meta( $post_id, $meta );
+			} elseif ( in_array( $serie, $tomadas, true ) ) {
+				set_transient(
+					'msp_sede_aviso_' . $post_id,
+					/* translators: %s: serie. */
+					sprintf( __( 'La serie %s está repetida en esta misma sede y no se guardó: boletas, facturas y cada tipo de nota necesitan series distintas.', 'multisede-pos' ), $serie ),
+					60
+				);
+				delete_post_meta( $post_id, $meta );
 			} elseif ( MSP_Comprobante::serie_en_uso( $serie, $post_id ) ) {
 				set_transient(
 					'msp_sede_aviso_' . $post_id,
@@ -318,6 +327,7 @@ class MSP_Sedes {
 				delete_post_meta( $post_id, $meta );
 			} else {
 				update_post_meta( $post_id, $meta, $serie );
+				$tomadas[] = $serie;
 			}
 		}
 	}

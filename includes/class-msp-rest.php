@@ -423,6 +423,10 @@ class MSP_REST {
 			'serie_nc_boleta'  => 'nc_boleta',
 			'serie_nc_factura' => 'nc_factura',
 		);
+		$rep = $this->serie_repetida( $req, $series, 0 );
+		if ( $rep ) {
+			return $rep;
+		}
 		foreach ( $series as $param => $tipo ) {
 			$serie = $req->get_param( $param );
 			if ( ! $serie ) {
@@ -505,6 +509,10 @@ class MSP_REST {
 			'serie_nc_boleta'  => 'nc_boleta',
 			'serie_nc_factura' => 'nc_factura',
 		);
+		$rep = $this->serie_repetida( $req, $series, $id );
+		if ( $rep ) {
+			return $rep;
+		}
 		foreach ( $series as $param => $tipo ) {
 			$serie = $req->get_param( $param );
 			if ( ! $serie ) {
@@ -605,10 +613,48 @@ class MSP_REST {
 						'key'   => '_msp_serie_factura',
 						'value' => $serie,
 					),
+					array(
+						'key'   => '_msp_serie_nc_boleta',
+						'value' => $serie,
+					),
+					array(
+						'key'   => '_msp_serie_nc_factura',
+						'value' => $serie,
+					),
 				),
 			)
 		);
 		return $posts ? (int) $posts[0] : 0;
+	}
+
+	/**
+	 * Rechaza una serie repetida dentro de la misma sede, mirando el valor
+	 * final de cada campo (el enviado o, si no viene, el que ya tiene).
+	 *
+	 * @param WP_REST_Request $req    Petición.
+	 * @param array           $series param => tipo.
+	 * @param int             $id     Sede (0 al crear).
+	 * @return WP_Error|null
+	 */
+	private function serie_repetida( $req, $series, $id ) {
+		$finales = array();
+		foreach ( $series as $param => $tipo ) {
+			$enviada = $req->get_param( $param );
+			if ( null !== $enviada ) {
+				$finales[ $tipo ] = (string) $enviada;
+			} elseif ( $id ) {
+				$finales[ $tipo ] = (string) get_post_meta( $id, '_msp_' . $param, true );
+			}
+		}
+		$rep = MSP_Comprobante::serie_repetida_en_sede( $finales );
+		if ( '' === $rep ) {
+			return null;
+		}
+		return new WP_Error(
+			'msp_serie_repetida',
+			sprintf( 'La serie %s quedaría repetida en esta misma sede: boletas, facturas y cada tipo de nota necesitan series distintas.', $rep ),
+			array( 'status' => 409 )
+		);
 	}
 
 	/**

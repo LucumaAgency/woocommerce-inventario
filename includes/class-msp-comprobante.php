@@ -238,6 +238,31 @@ class MSP_Comprobante {
 	}
 
 	/**
+	 * Serie repetida entre los campos de UNA misma sede.
+	 *
+	 * La numeración va por serie (no por tipo): si la serie de notas de una
+	 * tienda es igual a su serie de boletas, boletas y notas comparten un solo
+	 * contador y ante SUNAT las dos secuencias quedan con huecos.
+	 *
+	 * @param array $series tipo => serie (las vacías se ignoran).
+	 * @return string La serie repetida, o '' si no hay.
+	 */
+	public static function serie_repetida_en_sede( $series ) {
+		$vistas = array();
+		foreach ( (array) $series as $serie ) {
+			$serie = strtoupper( trim( (string) $serie ) );
+			if ( '' === $serie ) {
+				continue;
+			}
+			if ( isset( $vistas[ $serie ] ) ) {
+				return $serie;
+			}
+			$vistas[ $serie ] = true;
+		}
+		return '';
+	}
+
+	/**
 	 * Comprueba si una serie ya está usada por OTRA sede.
 	 *
 	 * Dos sedes no pueden compartir serie: se pisarían el correlativo. Se valida
@@ -277,6 +302,17 @@ class MSP_Comprobante {
 				),
 				array(
 					'key'   => self::META_SERIE_FACTURA,
+					'value' => $serie,
+				),
+				// Las de nota de crédito también numeran: hasta v1.30.0 no se
+				// miraban y una sede podía recibir como serie de notas la de
+				// boletas de otra tienda (un solo contador para dos documentos).
+				array(
+					'key'   => self::META_SERIE_NC_BOLETA,
+					'value' => $serie,
+				),
+				array(
+					'key'   => self::META_SERIE_NC_FACTURA,
 					'value' => $serie,
 				),
 			),

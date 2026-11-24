@@ -448,6 +448,8 @@ cajero SOLICITA  →  gerente APRUEBA  →  se emite a SUNAT
 
 **Dos series por sede, no una.** La serie de una nota **hereda la letra del documento que corrige**: `BC00` para las que corrigen boletas, `FC00` para las de facturas. Por eso en el mapa de tipos son dos entradas (`nc_boleta`, `nc_factura`) aunque ante SUNAT sean el mismo documento `07`.
 
+**Las series de nota no pueden repetir ninguna otra (v1.31.1).** El correlativo se toma por `(entorno, ruc, serie)`, sin mirar el tipo: si la serie de notas de una tienda fuera igual a una de boletas o facturas, los dos documentos compartirían contador y ante SUNAT (que numera por tipo + serie) ambas secuencias quedarían con huecos. Hasta v1.30.0 `serie_en_uso()` solo miraba las metas de boleta y factura, y no había control dentro de la misma sede. Ahora se miran las **cuatro** metas entre sedes del mismo RUC (`MSP_Comprobante::serie_en_uso`, y el gemelo de la API) y `serie_repetida_en_sede()` impide repetir serie entre los cuatro campos de una misma sede, en la pantalla y en `POST /sedes` y `POST /sedes/{id}` (en la edición compara contra el valor final: el enviado o el que ya tenía).
+
 **Tres motivos del catálogo 09, no los diez:** anulación de la operación, anulación por error en el RUC, y devolución total o parcial. Cada opción de más es una pantalla más confusa para quien la usa con clientes esperando.
 
 **Detalles que evitan declarar mal:**

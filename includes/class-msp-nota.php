@@ -96,6 +96,10 @@ class MSP_Nota {
 			);
 		}
 
+		if ( ! self::puede_pedir_sobre( $c ) ) {
+			return new WP_Error( 'msp_otra_sede', __( 'Esa venta es de una tienda que no tienes asignada.', 'multisede-pos' ) );
+		}
+
 		if ( MSP_Comprobante::es_nota( $c ) ) {
 			return new WP_Error( 'msp_nota_de_nota', __( 'No se emite una nota de crédito sobre otra nota de crédito.', 'multisede-pos' ) );
 		}
@@ -216,8 +220,10 @@ class MSP_Nota {
 			return new WP_Error( 'msp_ya_resuelta', __( 'Esa solicitud ya fue resuelta.', 'multisede-pos' ) );
 		}
 
-		// Quien pide no aprueba: es el sentido de tener dos manos.
-		if ( (int) $s['solicitante_id'] === get_current_user_id() && ! current_user_can( 'manage_options' ) ) {
+		// Quien pide no aprueba: es el sentido de tener dos manos. Sin excepción
+		// para administradores: si el dueño trabaja con cuenta de admin, la
+		// excepción dejaba la nota en una sola mano (corregido en v1.31.0).
+		if ( (int) $s['solicitante_id'] === get_current_user_id() ) {
 			return new WP_Error(
 				'msp_autoaprobacion',
 				__( 'No puedes aprobar tu propia solicitud: tiene que revisarla otra persona.', 'multisede-pos' )
@@ -516,6 +522,68 @@ class MSP_Nota {
 			$wpdb->prepare( "SELECT * FROM {$tabla} WHERE id = %d", (int) $id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			ARRAY_A
 		);
+	}
+
+	/**
+	 * ¿Puede el usuario actual pedir una nota sobre este comprobante?
+	 *
+	 * Quien ve los reportes (gerente, admin) puede sobre cualquier tienda, como
+	 * ya ve todos los comprobantes. El cajero, solo sobre ventas de sus sedes.
+	 *
+	 * @param array $c Comprobante.
+	 * @return bool
+	 */
+	public static function puede_pedir_sobre( $c ) {
+		if ( current_user_can( 'manage_options' ) || current_user_can( 'msp_ver_reportes' ) ) {
+			return true;
+		}
+		return in_array( (int) $c['sede_id'], MSP_Roles::sedes_de_usuario( get_current_user_id() ), true );
+	}
+
+	/**
+	 * Busca comprobantes para iniciar una nota desde la pantalla de notas.
+	 *
+	 * Acepta el número tal como sale en el ticket (B100-00000025), abreviado
+	 * (B100-25, b100 25) o el número de pedido (#171). Es la puerta de entrada
+	 * del cajero, que no tiene acceso al listado de Comprobantes.
+	 *
+	 * @param string $texto  Lo que tecleó.
+	 * @param int    $limite Máximo de filas.
+	 * @return array Filas de comprobante visibles para el usuario.
+	 */
+	public static function buscar_comprobantes( $texto, $limite = 10 ) {
+		global $wpdb;
+		$tabla = MSP_Comprobante::tabla();
+		$texto = strtoupper( trim( (string) $texto ) );
+
+		if ( '' === $texto ) {
+			return array();
+		}
+
+		if ( preg_match( '/^([A-Z][A-Z0-9]{3})[\s\-]*0*(\d+)$/', $texto, $m ) ) {
+			$filas = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT * FROM {$tabla} WHERE serie = %s AND correlativo = %d ORDER BY id DESC LIMIT %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					$m[1],
+					(int) $m[2],
+					(int) $limite
+				),
+				ARRAY_A
+			);
+		} elseif ( preg_match( '/^#?\s*(\d+)$/', $texto, $m ) ) {
+			$filas = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT * FROM {$tabla} WHERE pedido_id = %d ORDER BY id DESC LIMIT %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					(int) $m[1],
+					(int) $limite
+				),
+				ARRAY_A
+			);
+		} else {
+			return array();
+		}
+
+		return array_values( array_filter( (array) $filas, array( __CLASS__, 'puede_pedir_sobre' ) ) );
 	}
 
 	/**

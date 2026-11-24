@@ -441,7 +441,8 @@ cajero SOLICITA  →  gerente APRUEBA  →  se emite a SUNAT
 ```
 
 - **La solicitud NO reserva correlativo.** El número se toma al aprobar. Si se reservara al pedirla, cada solicitud rechazada dejaría un hueco en la serie, y SUNAT exige numeración sin huecos. Por eso las solicitudes viven en su propia tabla (`msp_notas`) y no en la de comprobantes: una es un trámite interno que puede rechazarse, la otra es un documento fiscal.
-- **Quien pide no aprueba.** Un gerente puede pedir y aprobar, pero no *su propia* solicitud: con dos gerentes en la tienda el circuito mantiene las dos manos. Lo impide el código, no la capacidad.
+- **Quien pide no aprueba.** Un gerente puede pedir y aprobar, pero no *su propia* solicitud: con dos gerentes en la tienda el circuito mantiene las dos manos. Lo impide el código, no la capacidad, **y sin excepción para administradores** (hasta v1.30.0 un admin sí podía aprobar lo que él mismo pidió; corregido en v1.31.0). En la bandeja, una solicitud propia muestra «La pediste tú» en vez de los botones.
+- **Cómo llega el cajero a pedirla (v1.31.0).** El cajero no ve *Caja → Comprobantes* (exige `msp_ver_reportes`), así que el botón de esa lista no le servía. La pantalla *Caja → Notas de crédito* tiene un **buscador**: acepta el número del ticket completo o abreviado (`B100-00000025`, `B100-25`, `b100 25`) o el número de pedido (`171`, `#171`). Al cajero solo le salen ventas de **sus sedes** (`_msp_sedes`), y la bandeja de solicitudes también se filtra a sus sedes; el servidor rechaza una solicitud sobre otra tienda (`MSP_Nota::puede_pedir_sobre`). Quien tiene `msp_ver_reportes` o es admin ve todas.
 - Capacidades separadas: `msp_solicitar_notas` (cajero) y `msp_aprobar_notas` (gerente). **ROLES_VERSION 4.**
 - **El stock y el dinero se mueven al aprobar**, no al pedir: hasta ese momento no ha pasado nada real.
 

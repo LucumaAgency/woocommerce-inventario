@@ -149,10 +149,83 @@ class MSP_Notas_Pantalla {
 
 			<?php if ( $sobre ) : ?>
 				<?php $this->formulario( $sobre ); ?>
+			<?php else : ?>
+				<?php $this->buscador(); ?>
 			<?php endif; ?>
 
 			<?php $this->bandeja(); ?>
 		</div>
+		<?php
+	}
+
+	/**
+	 * Buscador de la venta sobre la que se pide la nota.
+	 *
+	 * Es la entrada del cajero: no ve el listado de Comprobantes (es de
+	 * reportes), así que busca la venta aquí por el número del ticket o del
+	 * pedido. Solo le salen ventas de sus tiendas.
+	 */
+	private function buscador() {
+		$q     = isset( $_GET['q'] ) ? sanitize_text_field( wp_unslash( $_GET['q'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$filas = '' !== $q ? MSP_Nota::buscar_comprobantes( $q ) : array();
+		?>
+		<h2><?php esc_html_e( 'Pedir una nota de crédito', 'multisede-pos' ); ?></h2>
+		<form method="get" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+			<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE ); ?>" />
+			<label for="msp-nota-q" class="screen-reader-text"><?php esc_html_e( 'Número de boleta, factura o pedido', 'multisede-pos' ); ?></label>
+			<input type="search" id="msp-nota-q" name="q" value="<?php echo esc_attr( $q ); ?>" style="width:260px"
+				placeholder="<?php esc_attr_e( 'B100-25, F100-3 o n.º de pedido', 'multisede-pos' ); ?>" />
+			<?php submit_button( __( 'Buscar venta', 'multisede-pos' ), 'secondary', '', false ); ?>
+		</form>
+		<p class="description" style="margin-top:0">
+			<?php esc_html_e( 'Escribe el número que figura en el ticket del cliente (no hacen falta los ceros) o el número de pedido.', 'multisede-pos' ); ?>
+		</p>
+
+		<?php if ( '' === $q ) : ?>
+			<?php return; ?>
+		<?php endif; ?>
+
+		<?php if ( ! $filas ) : ?>
+			<div class="notice notice-warning inline"><p>
+				<?php esc_html_e( 'No se encontró esa venta en tus tiendas. Revisa el número del ticket.', 'multisede-pos' ); ?>
+			</p></div>
+			<?php return; ?>
+		<?php endif; ?>
+
+		<table class="widefat striped" style="max-width:60em;margin-top:8px">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'Comprobante', 'multisede-pos' ); ?></th>
+					<th><?php esc_html_e( 'Pedido', 'multisede-pos' ); ?></th>
+					<th><?php esc_html_e( 'Cliente', 'multisede-pos' ); ?></th>
+					<th><?php esc_html_e( 'Total', 'multisede-pos' ); ?></th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $filas as $c ) : ?>
+					<tr>
+						<td>
+							<?php echo esc_html( MSP_Comprobante::dato_tipo( $c['tipo'], 'corto' ) . ' ' . MSP_Comprobante::numero( $c ) ); ?>
+						</td>
+						<td><?php echo $c['pedido_id'] ? '#' . esc_html( $c['pedido_id'] ) : '—'; ?></td>
+						<td><?php echo esc_html( isset( $c['cliente_nombre'] ) && $c['cliente_nombre'] ? $c['cliente_nombre'] : '—' ); ?></td>
+						<td>S/ <?php echo esc_html( number_format( (float) $c['total'], 2 ) ); ?></td>
+						<td>
+							<?php if ( MSP_Comprobante::es_nota( $c ) ) : ?>
+								<em><?php esc_html_e( 'Es una nota de crédito: no se corrige con otra nota.', 'multisede-pos' ); ?></em>
+							<?php elseif ( 'aceptado' !== $c['estado'] ) : ?>
+								<em><?php esc_html_e( 'SUNAT todavía no la aceptó: aún no se puede pedir nota.', 'multisede-pos' ); ?></em>
+							<?php else : ?>
+								<a class="button button-primary" href="<?php echo esc_url( self::url( array( 'comprobante' => $c['id'] ) ) ); ?>">
+									<?php esc_html_e( 'Pedir nota sobre esta venta', 'multisede-pos' ); ?>
+								</a>
+							<?php endif; ?>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
 		<?php
 	}
 
@@ -165,6 +238,11 @@ class MSP_Notas_Pantalla {
 		$c = MSP_Comprobante::obtener( $comprobante_id );
 		if ( ! $c ) {
 			echo '<div class="notice notice-error"><p>' . esc_html__( 'Ese comprobante no existe.', 'multisede-pos' ) . '</p></div>';
+			return;
+		}
+
+		if ( ! MSP_Nota::puede_pedir_sobre( $c ) ) {
+			echo '<div class="notice notice-error"><p>' . esc_html__( 'Esa venta es de una tienda que no tienes asignada.', 'multisede-pos' ) . '</p></div>';
 			return;
 		}
 
@@ -280,7 +358,13 @@ class MSP_Notas_Pantalla {
 	 */
 	private function bandeja() {
 		$puede_aprobar = current_user_can( MSP_Nota::CAP_APROBAR );
-		$solicitudes   = MSP_Nota::listar( array( 'limite' => 50 ) );
+		// El cajero ve solo las de sus tiendas: la bandeja lleva clientes e importes.
+		$solicitudes = array_values(
+			array_filter(
+				MSP_Nota::listar( array( 'limite' => 50 ) ),
+				array( 'MSP_Nota', 'puede_pedir_sobre' )
+			)
+		);
 		$estados       = MSP_Nota::estados();
 		$motivos       = MSP_Comprobante::motivos_nota();
 		?>
@@ -344,7 +428,9 @@ class MSP_Notas_Pantalla {
 						</td>
 						<?php if ( $puede_aprobar ) : ?>
 							<td>
-								<?php if ( 'pendiente' === $s['estado'] ) : ?>
+								<?php if ( 'pendiente' === $s['estado'] && (int) $s['solicitante_id'] === get_current_user_id() ) : ?>
+									<em style="color:#666"><?php esc_html_e( 'La pediste tú: la aprueba otra persona.', 'multisede-pos' ); ?></em>
+								<?php elseif ( 'pendiente' === $s['estado'] ) : ?>
 									<form method="post" style="display:flex;gap:4px;flex-wrap:wrap">
 										<?php wp_nonce_field( 'msp_notas', 'msp_nota_nonce' ); ?>
 										<input type="hidden" name="solicitud" value="<?php echo esc_attr( $s['id'] ); ?>" />
